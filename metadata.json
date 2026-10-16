@@ -1,0 +1,6 @@
+{
+  "name": "WWCF Santa Cruz - Worship Song Line-up Scheduler",
+  "description": "Song line-up scheduler and worship ministry manager for Word for the World Christian Fellowship - Santa Cruz",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

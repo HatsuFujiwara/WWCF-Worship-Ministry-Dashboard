@@ -1,0 +1,789 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --primary-color: #1b75bc;
+  --primary-hover: #165d97;
+  --primary-active: #164f7c;
+  --primary-light: #f0f7fc;
+  --primary-border: #dbeefa;
+  --primary-dark-bg: #0f2b44;
+
+  /* WWCF Surface Hierarchy 0-4 (Light Mode) */
+  --surface-0: #f8fafc;
+  --surface-1: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #ffffff;
+  --surface-4: #e2e8f0;
+
+  /* Glassmorphic Surfaces (Light Mode) */
+  --glass-header: rgba(255, 255, 255, 0.88);
+  --glass-sidebar: rgba(255, 255, 255, 0.94);
+  --glass-card: rgba(255, 255, 255, 0.82);
+  --glass-modal: rgba(255, 255, 255, 0.97);
+  --glass-border: rgba(226, 232, 240, 0.85);
+  --glass-blur: 14px;
+}
+
+/* AMOLED Dark Theme CSS Variable Overrides */
+.dark {
+  /* WWCF Surface Hierarchy 0-4 (AMOLED Dark Mode) */
+  --surface-0: #000000; /* Level 0: AMOLED Pure Black Foundation */
+  --surface-1: #0A0A0A; /* Level 1: Standard Content Surface */
+  --surface-2: #121212; /* Level 2: Elevated Surface */
+  --surface-3: #181818; /* Level 3: Floating / Modal Surface */
+  --surface-4: #222222; /* Level 4: Active / Focus Surface */
+
+  /* Glassmorphic Surfaces (AMOLED Dark Mode) */
+  --glass-header: rgba(10, 10, 10, 0.82);
+  --glass-sidebar: rgba(10, 10, 10, 0.92);
+  --glass-card: rgba(14, 14, 14, 0.8);
+  --glass-modal: rgba(18, 18, 18, 0.95);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: 16px;
+
+  /* Primary Background: Pure Black */
+  --color-slate-950: #000000;
+
+  /* Secondary Background (Cards, Dialogs, Modals, Header, Sidebar): #0A0A0A */
+  --color-slate-900: #0A0A0A;
+
+  /* Elevated Surfaces & Inputs: #111111 */
+  --color-slate-800: #111111;
+
+  /* Subtle Borders & Dividers: #1F1F1F */
+  --color-slate-700: #1F1F1F;
+
+  /* Active/Hover Borders: #262626 */
+  --color-slate-600: #262626;
+
+  /* Disabled & Muted Text: #6B7280 */
+  --color-slate-500: #6B7280;
+
+  /* Muted Labels & Secondary Icons: #8C8C8C */
+  --color-slate-400: #8C8C8C;
+
+  /* Secondary Text: #B3B3B3 */
+  --color-slate-300: #B3B3B3;
+
+  /* High Contrast Text: #E5E5E5 */
+  --color-slate-200: #E5E5E5;
+
+  /* Primary White Text: #FFFFFF */
+  --color-slate-100: #FFFFFF;
+
+  /* Slate 50 in dark mode fallback */
+  --color-slate-50: #0A0A0A;
+
+  /* AMOLED Brand Blue / Indigo Tints with #1b75bc accent */
+  --color-indigo-950: #081929;
+  --color-indigo-900: #0d2840;
+  --color-indigo-800: #143e63;
+  --color-indigo-700: #165d97;
+  --color-indigo-600: #1b75bc;
+  --color-indigo-500: #2896d3;
+  --color-indigo-400: #54b0e2;
+  --color-indigo-300: #8ccbed;
+  --color-indigo-200: #bce0f5;
+  --color-indigo-100: #dbeefa;
+  --color-indigo-50:  #0a1520;
+
+  /* Dark mode badge & surface accents */
+  --color-amber-950: #1a1202;
+  --color-amber-900: #2e1f04;
+  --color-amber-800: #4d3307;
+
+  --color-emerald-950: #021a0e;
+  --color-emerald-900: #042e18;
+  --color-emerald-800: #074d28;
+
+  --color-rose-950: #1a0206;
+  --color-rose-900: #2e040b;
+  --color-rose-800: #4d0713;
+
+  background-color: #000000 !important;
+  color: #FFFFFF;
+}
+
+html.dark,
+body.dark {
+  background-color: #000000 !important;
+  color: #FFFFFF;
+}
+
+/* Custom scrollbars for AMOLED Dark Mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #000000;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #1f1f1f;
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #262626;
+}
+
+/* Ensure native controls adapt properly in dark mode */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark select {
+  color-scheme: dark;
+}
+
+@theme {
+  --color-primary: #1b75bc;
+  --color-primary-hover: #165d97;
+  --color-primary-active: #164f7c;
+
+  --color-brand-50: #f0f7fc;
+  --color-brand-100: #dbeefa;
+  --color-brand-200: #bce0f5;
+  --color-brand-300: #8ccbed;
+  --color-brand-400: #54b0e2;
+  --color-brand-500: #2896d3;
+  --color-brand-600: #1b75bc;
+  --color-brand-700: #165d97;
+  --color-brand-800: #164f7c;
+  --color-brand-900: #174366;
+  --color-brand-950: #0f2b44;
+
+  --color-indigo-50: #f0f7fc;
+  --color-indigo-100: #dbeefa;
+  --color-indigo-200: #bce0f5;
+  --color-indigo-300: #8ccbed;
+  --color-indigo-400: #54b0e2;
+  --color-indigo-500: #2896d3;
+  --color-indigo-600: #1b75bc;
+  --color-indigo-700: #165d97;
+  --color-indigo-800: #164f7c;
+  --color-indigo-900: #174366;
+  --color-indigo-950: #0f2b44;
+}
+
+@media print {
+  /* Hide standard screen elements when printing */
+  body > div:not(#print-mount-point),
+  .no-print,
+  aside,
+  header,
+  nav,
+  button,
+  .no-print-area {
+    display: none !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-container,
+  .print-container * {
+    visibility: visible !important;
+  }
+
+  .print-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 10px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+}
+
+/* ==========================================================================
+   Accessibility & Motion Systems
+   ========================================================================== */
+
+/* Accessibility: Enhanced Focus Indicators (Default & Enhanced) */
+:focus-visible {
+  outline: 2px solid #1b75bc;
+  outline-offset: 2px;
+}
+
+.dark :focus-visible {
+  outline: 2px solid #54b0e2;
+  outline-offset: 2px;
+}
+
+.enhanced-focus :focus-visible {
+  outline: 3px solid #1b75bc !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(27, 117, 188, 0.45) !important;
+}
+
+.dark.enhanced-focus :focus-visible {
+  outline: 3px solid #54b0e2 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(84, 176, 226, 0.6) !important;
+}
+
+/* Accessibility: Text Size scaling */
+html.text-size-large {
+  font-size: 17px;
+}
+
+html.text-size-xl {
+  font-size: 18.5px;
+}
+
+/* Accessibility: High Contrast Mode (Preserves AMOLED black aesthetic) */
+.high-contrast button,
+.high-contrast input,
+.high-contrast select,
+.high-contrast textarea {
+  border-width: 1.5px !important;
+}
+
+.high-contrast {
+  --color-slate-400: #334155;
+  --color-slate-500: #1e293b;
+}
+
+.high-contrast .border-slate-200,
+.high-contrast .border-slate-300 {
+  border-color: #94a3b8 !important;
+}
+
+.dark.high-contrast {
+  --color-slate-400: #e2e8f0;
+  --color-slate-500: #cbd5e1;
+  --color-slate-300: #f8fafc;
+  --color-slate-200: #ffffff;
+}
+
+.dark.high-contrast .border-slate-800,
+.dark.high-contrast .border-slate-700,
+.dark.high-contrast .border-slate-600 {
+  border-color: #525252 !important;
+}
+
+.dark.high-contrast button,
+.dark.high-contrast input,
+.dark.high-contrast select,
+.dark.high-contrast textarea {
+  border-color: #737373 !important;
+}
+
+/* Accessibility: Larger Touch Targets (44px min for touch ergonomics) */
+.larger-touch-targets button,
+.larger-touch-targets [role="button"],
+.larger-touch-targets [role="switch"],
+.larger-touch-targets input[type="text"],
+.larger-touch-targets input[type="search"],
+.larger-touch-targets input[type="date"],
+.larger-touch-targets input[type="number"],
+.larger-touch-targets select,
+.larger-touch-targets textarea {
+  min-height: 44px;
+}
+
+.larger-touch-targets .touch-target-expand {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.larger-touch-targets input[type="checkbox"],
+.larger-touch-targets input[type="radio"] {
+  min-height: 20px;
+  min-width: 20px;
+}
+
+/* ==========================================================================
+   Professional Website Animations (Transform & Opacity Optimized, 60fps)
+   ========================================================================== */
+
+@keyframes appFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes appFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modalScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes dropdownSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Base Utility Classes for Tailwind v3/v4 Animation Compatibility */
+.animate-in {
+  animation-duration: 0.2s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+
+.animate-in.fade-in {
+  animation-name: appFadeIn;
+}
+
+.animate-in.zoom-in-95 {
+  animation-name: modalScaleIn;
+}
+
+.animate-in.fade-in.zoom-in-95 {
+  animation-name: modalScaleIn;
+}
+
+.animate-in.slide-in-from-bottom-3 {
+  animation-name: toastSlideUp;
+}
+
+.animate-in.slide-in-from-top-2 {
+  animation-name: dropdownSlideDown;
+}
+
+.animate-in.duration-150 {
+  animation-duration: 0.15s;
+}
+
+.animate-in.duration-200 {
+  animation-duration: 0.2s;
+}
+
+.animate-in.duration-300 {
+  animation-duration: 0.25s;
+}
+
+/* Dedicated Component Motion Classes */
+.page-transition {
+  animation: appFadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.modal-enter-animation {
+  animation: modalScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.backdrop-enter-animation {
+  animation: appFadeIn 0.18s ease-out forwards;
+  will-change: opacity;
+}
+
+.dropdown-enter-animation {
+  animation: dropdownSlideDown 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+  transform-origin: top;
+}
+
+.toast-enter-animation {
+  animation: toastSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Subtle, Polished Hover & Press Transitions */
+.card-hover-polish {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.18s ease, background-color 0.15s ease;
+}
+
+.card-hover-polish:hover {
+  transform: translateY(-1.5px);
+}
+
+.card-hover-polish:active {
+  transform: translateY(0);
+}
+
+.btn-press-feedback {
+  transition: transform 0.12s ease, opacity 0.12s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-press-feedback:active {
+  transform: scale(0.98);
+}
+
+/* ==========================================================================
+   Accessibility: Reduced Motion System
+   Suppresses non-essential decorative motion, translations, and scaling,
+   while preserving essential state indicators (e.g. switch toggles, drawer navigation),
+   layout integrity, and accessible color/border transitions.
+   ========================================================================== */
+
+.reduced-motion,
+.reduced-motion [data-motion="true"],
+.reduced-motion .page-transition,
+.reduced-motion .modal-enter-animation,
+.reduced-motion .backdrop-enter-animation,
+.reduced-motion .dropdown-enter-animation,
+.reduced-motion .toast-enter-animation,
+.reduced-motion .animate-in {
+  animation: none !important;
+}
+
+/* Instant opacity resolution without spatial translation */
+.reduced-motion .page-transition,
+.reduced-motion .modal-enter-animation,
+.reduced-motion .backdrop-enter-animation,
+.reduced-motion .dropdown-enter-animation,
+.reduced-motion .toast-enter-animation,
+.reduced-motion .animate-in {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Suppress non-essential hover and active transforms */
+.reduced-motion .card-hover-polish:hover,
+.reduced-motion .card-hover-polish:active,
+.reduced-motion .btn-press-feedback:active,
+.reduced-motion [class*="hover:-translate"],
+.reduced-motion [class*="hover:translate"],
+.reduced-motion [class*="active:scale"],
+.reduced-motion [class*="hover:scale"],
+.reduced-motion [class*="group-hover:scale"],
+.reduced-motion [class*="group-hover:translate"] {
+  transform: none !important;
+}
+
+/* Suppress decorative animation loops */
+.reduced-motion .animate-pulse,
+.reduced-motion .animate-bounce,
+.reduced-motion [data-tour-pulse] {
+  animation: none !important;
+}
+
+/* Keep toggle switches fully functional: explicitly preserve switch knob translations */
+.reduced-motion [role="switch"] span,
+.reduced-motion [role="switch"] div {
+  transition: transform 0.15s ease !important;
+}
+
+/* Preserve smooth scrolling behavior override */
+.reduced-motion * {
+  scroll-behavior: auto !important;
+}
+
+/* ==========================================================================
+   Accessibility: Display Density Modes
+   ========================================================================== */
+html.density-compact .p-6 {
+  padding: 1rem !important;
+}
+html.density-compact .p-5 {
+  padding: 0.875rem !important;
+}
+html.density-compact .space-y-6 > * + * {
+  margin-top: 1rem !important;
+}
+html.density-compact .space-y-4 > * + * {
+  margin-top: 0.65rem !important;
+}
+
+html.density-spacious .p-4 {
+  padding: 1.5rem !important;
+}
+html.density-spacious .p-6 {
+  padding: 2rem !important;
+}
+html.density-spacious .space-y-4 > * + * {
+  margin-top: 1.5rem !important;
+}
+
+/* ==========================================================================
+   Accessibility & Performance: Low-End Hardware / Performance Mode
+   ========================================================================== */
+.performance-mode {
+  --glass-header: #ffffff !important;
+  --glass-sidebar: #ffffff !important;
+  --glass-card: #ffffff !important;
+  --glass-modal: #ffffff !important;
+  --glass-border: #e2e8f0 !important;
+  --glass-blur: 0px !important;
+}
+
+.dark.performance-mode,
+.dark .performance-mode {
+  --glass-header: #0A0A0A !important;
+  --glass-sidebar: #0A0A0A !important;
+  --glass-card: #121212 !important;
+  --glass-modal: #181818 !important;
+  --glass-border: #1F1F1F !important;
+  --glass-blur: 0px !important;
+}
+
+.performance-mode *,
+.performance-mode *::before,
+.performance-mode *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
+}
+
+/* Explicitly preserve essential state transitions (e.g. switch toggles) */
+.performance-mode [role="switch"] span,
+.performance-mode [role="switch"] div {
+  transition: transform 0.05s ease !important;
+}
+
+/* Instant opacity resolution without spatial translation */
+.performance-mode .page-transition,
+.performance-mode .modal-enter-animation,
+.performance-mode .backdrop-enter-animation,
+.performance-mode .dropdown-enter-animation,
+.performance-mode .toast-enter-animation,
+.performance-mode .animate-in {
+  opacity: 1 !important;
+  transform: none !important;
+  animation: none !important;
+}
+
+.performance-mode .backdrop-blur-xs,
+.performance-mode .backdrop-blur-sm,
+.performance-mode .backdrop-blur-md,
+.performance-mode .backdrop-blur-lg {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.dark.performance-mode .backdrop-blur-xs,
+.dark.performance-mode .backdrop-blur-sm,
+.dark.performance-mode .backdrop-blur-md,
+.dark.performance-mode .backdrop-blur-lg {
+  background-color: #0A0A0A !important;
+}
+
+/* Surface Hierarchy & Glass Utility Classes */
+.surface-0 {
+  background-color: var(--surface-0);
+}
+.surface-1 {
+  background-color: var(--surface-1);
+}
+.surface-2 {
+  background-color: var(--surface-2);
+}
+.surface-3 {
+  background-color: var(--surface-3);
+}
+.surface-4 {
+  background-color: var(--surface-4);
+}
+
+.wwcf-glass-header {
+  background-color: var(--glass-header);
+  backdrop-filter: blur(var(--glass-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 14px));
+  border-color: var(--glass-border);
+}
+
+.wwcf-glass-sidebar {
+  background-color: var(--glass-sidebar);
+  backdrop-filter: blur(var(--glass-blur, 16px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px));
+  border-color: var(--glass-border);
+}
+
+.wwcf-glass-card {
+  background-color: var(--glass-card);
+  backdrop-filter: blur(var(--glass-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 12px));
+  border: 1px solid var(--glass-border);
+}
+
+.wwcf-glass-modal {
+  background-color: var(--glass-modal);
+  backdrop-filter: blur(var(--glass-blur, 16px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px));
+  border: 1px solid var(--glass-border);
+}
+
+/* Redesigned Workspace Surface & Layout Utilities */
+.wwcf-surface-hero {
+  background: radial-gradient(120% 120% at 50% 0%, rgba(27, 117, 188, 0.08) 0%, rgba(10, 10, 10, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+:root:not(.dark) .wwcf-surface-hero {
+  background: radial-gradient(120% 120% at 50% 0%, rgba(27, 117, 188, 0.06) 0%, #ffffff 100%);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.05);
+}
+
+.wwcf-panel-group {
+  background-color: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+}
+
+.wwcf-interactive-row {
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.wwcf-interactive-row:hover {
+  transform: translateY(-1px);
+}
+.wwcf-interactive-row:active {
+  transform: translateY(0px) scale(0.995);
+}
+
+.btn-tactile {
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.12s ease, background-color 0.15s ease;
+}
+.btn-tactile:hover {
+  transform: translateY(-1px);
+}
+.btn-tactile:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.wwcf-accent-border {
+  border-color: rgba(27, 117, 188, 0.4);
+}
+.wwcf-accent-border:hover {
+  border-color: rgba(27, 117, 188, 0.7);
+}
+
+/* Reduced Motion overrides for tactile feedback */
+.reduced-motion .wwcf-interactive-row:hover,
+.reduced-motion .wwcf-interactive-row:active,
+.reduced-motion .btn-tactile:hover,
+.reduced-motion .btn-tactile:active {
+  transform: none !important;
+}
+
+/* ==========================================================================
+   Accessibility: Simplified Interface
+   ========================================================================== */
+.simplified-interface .animate-pulse,
+.simplified-interface .animate-bounce {
+  animation: none !important;
+}
+.simplified-interface .shadow-xl,
+.simplified-interface .shadow-2xl,
+.simplified-interface .shadow-lg {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1) !important;
+}
+.simplified-interface [data-decorative="true"] {
+  display: none !important;
+}
+
+/* ==========================================================================
+   Accessibility: Color Vision Palettes
+   ========================================================================== */
+/* Protanopia (Red-Blind): Shift red to amber-vermilion and green to sky blue */
+.color-vision-protanopia .text-rose-500,
+.color-vision-protanopia .text-rose-600,
+.color-vision-protanopia .text-red-500,
+.color-vision-protanopia .text-red-600 {
+  color: #c2410c !important;
+}
+.color-vision-protanopia .bg-rose-500,
+.color-vision-protanopia .bg-rose-600,
+.color-vision-protanopia .bg-red-500,
+.color-vision-protanopia .bg-red-600 {
+  background-color: #c2410c !important;
+}
+.color-vision-protanopia .text-emerald-500,
+.color-vision-protanopia .text-emerald-600,
+.color-vision-protanopia .text-green-600 {
+  color: #0284c7 !important;
+}
+.color-vision-protanopia .bg-emerald-500,
+.color-vision-protanopia .bg-emerald-600,
+.color-vision-protanopia .bg-green-600 {
+  background-color: #0284c7 !important;
+}
+
+/* Deuteranopia (Green-Blind): Shift green to clear blue and keep amber high-contrast */
+.color-vision-deuteranopia .text-emerald-500,
+.color-vision-deuteranopia .text-emerald-600,
+.color-vision-deuteranopia .text-green-500,
+.color-vision-deuteranopia .text-green-600 {
+  color: #0284c7 !important;
+}
+.color-vision-deuteranopia .bg-emerald-500,
+.color-vision-deuteranopia .bg-emerald-600,
+.color-vision-deuteranopia .bg-green-500,
+.color-vision-deuteranopia .bg-green-600 {
+  background-color: #0284c7 !important;
+}
+.color-vision-deuteranopia .text-amber-600,
+.color-vision-deuteranopia .text-amber-700 {
+  color: #d97706 !important;
+}
+
+/* Tritanopia (Blue-Blind): Shift blue to deep teal and yellow to coral */
+.color-vision-tritanopia .text-blue-600,
+.color-vision-tritanopia .text-indigo-600,
+.color-vision-tritanopia .text-sky-600 {
+  color: #0f766e !important;
+}
+.color-vision-tritanopia .bg-blue-600,
+.color-vision-tritanopia .bg-indigo-600,
+.color-vision-tritanopia .bg-sky-600 {
+  background-color: #0f766e !important;
+}
+
+/* Monochrome / Achromatopsia: High luminance contrast with distinct border weights */
+.color-vision-monochrome {
+  filter: grayscale(100%);
+}
+.color-vision-monochrome button,
+.color-vision-monochrome input,
+.color-vision-monochrome select,
+.color-vision-monochrome [role="button"] {
+  border-width: 1.5px !important;
+}
+
+
