@@ -73,24 +73,32 @@ If testing in an environment where `.env` is not editable directly, you can also
 
 ---
 
-## 4. Verification Checklist
+## 4. Verification Checklist & Operations
 
-1. **First-run prompt:** After dismissing or completing the accessibility tour, the Google Account connection offer modal appears. Dismissing it with "Continue offline" or "Not now" keeps the app 100% functional.
-2. **Google Drive Sync:**
-   - In **Settings > Google Account & Cloud Backup**, click **Connect Google Account**.
-   - Grant the requested permissions (`drive.file` and `youtube.readonly`).
-   - Click **Sync Now**.
-   - Check Google Drive: A file named `WWCF_Santa_Cruz_Worship_Ministry_Backup.json` appears with current members, songs, schedules, and song families.
-3. **Conflict Resolution:**
-   - If the remote file in Drive is modified on another device, clicking Sync detects the revision timestamp difference and prompts with choices: "Keep Local", "Use Cloud Version", "Merge Both", or "Save Copy".
-4. **YouTube Playlist Import Without API Key:**
-   - Open **Song Database > Import YouTube Songs / Playlist** or Scheduler import.
-   - Enter a YouTube or YouTube Music playlist link (public, unlisted, or private from the logged-in account).
-   - Because Google is connected, the playlist is imported directly without asking for a YouTube API key.
-5. **Disconnect:**
-   - Clicking **Disconnect Account** clears in-memory tokens and resets state to disconnected, preserving all local schedules and songs.
-6. **Separate Cloud Copy:**
-   - If a conflict arises and you do not wish to overwrite either local or remote data, choose **Save as Separate Cloud Copy** in the conflict dialog to create a timestamped copy in Google Drive.
-7. **Optional Standalone YouTube API Key:**
-   - If a user prefers not to connect a Google Account, a personal YouTube Data API v3 key can be entered in **Settings > YouTube Data API v3 Key (Optional Fallback)** or inside the Smart Song Import modal. The key is validated, stored in memory, and optionally remembered on the device.
+1. **Option A Shared Architecture:**
+   - One shared public Google OAuth Web Client ID (`VITE_GOOGLE_CLIENT_ID`) is configured once by the site administrator.
+   - Visitors authorize their own personal Google Account via the standard Google Identity Services (GIS) popup.
+   - Each visitor's backup is stored in and loaded from their own personal Google Drive under `https://www.googleapis.com/auth/drive.file`.
+   - No Google Drive API key is used or exposed (an API key cannot authorize personal user Drive storage).
+2. **Two Independent Actions in Settings:**
+   - **Save to Drive:** Validates local data schema, confirms initial backup if no file exists in Drive, checks remote baseline to prevent accidental overwrites, and saves current data to Google Drive.
+   - **Load from Drive:** Inspects Drive backups, validates remote schema envelope, displays a preview comparison dialog showing collection counts (Songs, Schedules, Members, Families, Labels) against current device data, and offers three distinct actions:
+     - **Merge with this device**
+     - **Replace this device's data**
+     - **Cancel**
+   - Restoring data strictly does NOT trigger an automatic cloud upload.
+3. **Automatic Cloud Backup Setting (Opt-In):**
+   - Default is strictly OFF.
+   - Users can toggle **Automatic Cloud Backup** in Settings to automatically sync local changes to Google Drive in the background.
+   - Connecting a Google Account does not turn on auto-sync and does not auto-upload data upon connection.
+4. **Separate Cloud Copy:**
+   - Users can choose **Save as Separate Backup Copy** to create a timestamped file without altering the primary backup pointer or sync baseline.
+5. **Conflict Resolution & Concurrency Protection:**
+   - If a remote file in Drive was modified externally since the last known sync, a conflict dialog prompts the user with inspection details and clear choices before any write occurs.
+6. **YouTube Playlist Import Without API Key:**
+   - With Google Account connected, public, unlisted, and private playlists from the account can be imported directly via `https://www.googleapis.com/auth/youtube.readonly` without needing a manual YouTube API key.
+7. **Disconnect & Isolation:**
+   - Disconnecting clears in-memory tokens and isolates account-scoped metadata. Local records remain 100% intact.
+8. **Optional Fallback YouTube API Key:**
+   - Users who do not connect Google can still use an optional personal YouTube Data API v3 key for public and unlisted playlists.
 

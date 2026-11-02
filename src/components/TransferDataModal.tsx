@@ -7,6 +7,7 @@ import { StorageService, DraftSchedule } from '../services/storage';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
+import { BackupValidationService } from '../services/backupValidationService';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import {
   X,
@@ -118,31 +119,39 @@ async function buildCurrentPayload(options: {
 async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): Promise<void> {
   if (!incoming) return;
 
+  // Validate incoming payload with the central version-aware BackupValidationService
+  const validation = BackupValidationService.validate(incoming);
+  if (!validation.isValid || !validation.data) {
+    throw new Error(validation.error || 'The transferred data payload is invalid or unrecognized.');
+  }
+
+  const validData = validation.data;
+
   if (strategy === 'replace') {
-    if (Array.isArray(incoming.members)) {
-      StorageService.saveMembers(incoming.members);
+    if (Array.isArray(validData.members)) {
+      StorageService.saveMembers(validData.members);
     }
-    if (Array.isArray(incoming.labels)) {
-      StorageService.saveLabels(incoming.labels);
+    if (Array.isArray(validData.labels)) {
+      StorageService.saveLabels(validData.labels);
     }
-    if (Array.isArray(incoming.schedules)) {
-      StorageService.saveSchedules(incoming.schedules);
+    if (Array.isArray(validData.schedules)) {
+      StorageService.saveSchedules(validData.schedules);
     }
-    if (Array.isArray(incoming.songs)) {
-      await SongService.saveSongsList(incoming.songs);
+    if (Array.isArray(validData.songs)) {
+      await SongService.saveSongsList(validData.songs);
     }
-    if (Array.isArray(incoming.songFamilies)) {
-      await SongFamilyService.saveSongFamilies(incoming.songFamilies);
+    if (Array.isArray(validData.songFamilies)) {
+      await SongFamilyService.saveSongFamilies(validData.songFamilies);
     }
-    if (incoming.draft !== undefined) {
-      StorageService.saveDraftSchedule(incoming.draft);
+    if (validData.draftSchedule !== undefined) {
+      StorageService.saveDraftSchedule(validData.draftSchedule);
     }
   } else {
-    if (Array.isArray(incoming.members)) {
+    if (Array.isArray(validData.members)) {
       const currentMembers = StorageService.getMembersSync();
       const memberMap = new Map<string, Member>();
       currentMembers.forEach((m) => memberMap.set(m.id, m));
-      incoming.members.forEach((m: Member) => {
+      validData.members.forEach((m: Member) => {
         if (!memberMap.has(m.id)) {
           memberMap.set(m.id, m);
         }
@@ -150,17 +159,17 @@ async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): 
       StorageService.saveMembers(Array.from(memberMap.values()));
     }
 
-    if (Array.isArray(incoming.labels)) {
+    if (Array.isArray(validData.labels)) {
       const currentLabels = StorageService.getLabelsSync();
-      const labelSet = new Set([...currentLabels, ...incoming.labels]);
+      const labelSet = new Set([...currentLabels, ...validData.labels]);
       StorageService.saveLabels(Array.from(labelSet));
     }
 
-    if (Array.isArray(incoming.schedules)) {
+    if (Array.isArray(validData.schedules)) {
       const currentSchedules = StorageService.getSchedulesSync();
       const scheduleMap = new Map<string, Schedule>();
       currentSchedules.forEach((s) => scheduleMap.set(s.id, s));
-      incoming.schedules.forEach((s: Schedule) => {
+      validData.schedules.forEach((s: Schedule) => {
         if (!scheduleMap.has(s.id)) {
           scheduleMap.set(s.id, s);
         }
@@ -168,11 +177,11 @@ async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): 
       StorageService.saveSchedules(Array.from(scheduleMap.values()));
     }
 
-    if (Array.isArray(incoming.songs)) {
+    if (Array.isArray(validData.songs)) {
       const currentSongs = await SongService.getSongs();
       const songMap = new Map<string, Song>();
       currentSongs.forEach((s) => songMap.set(s.id, s));
-      incoming.songs.forEach((s: Song) => {
+      validData.songs.forEach((s: Song) => {
         if (!songMap.has(s.id)) {
           songMap.set(s.id, s);
         }
@@ -180,11 +189,11 @@ async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): 
       await SongService.saveSongsList(Array.from(songMap.values()));
     }
 
-    if (Array.isArray(incoming.songFamilies)) {
+    if (Array.isArray(validData.songFamilies)) {
       const currentFamilies = await SongFamilyService.getSongFamilies();
       const familyMap = new Map<string, any>();
       currentFamilies.forEach((f) => familyMap.set(f.id, f));
-      incoming.songFamilies.forEach((f: any) => {
+      validData.songFamilies.forEach((f: any) => {
         if (!familyMap.has(f.id)) {
           familyMap.set(f.id, f);
         }
@@ -192,8 +201,8 @@ async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): 
       await SongFamilyService.saveSongFamilies(Array.from(familyMap.values()));
     }
 
-    if (incoming.draft) {
-      StorageService.saveDraftSchedule(incoming.draft);
+    if (validData.draftSchedule !== undefined) {
+      StorageService.saveDraftSchedule(validData.draftSchedule);
     }
   }
 }

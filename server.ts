@@ -405,13 +405,19 @@ async function startServer() {
   app.post("/api/transfer/session/:sessionId/cancel", (req, res) => {
     try {
       const { sessionId } = req.params;
-      const token = (req.body.token as string) || (req.query.token as string) || (req.headers["x-transfer-token"] as string);
+      const token = (req.body?.token as string) || (req.query.token as string) || (req.headers["x-transfer-token"] as string);
 
       const session = transferSessions.get(sessionId);
-      if (session && safeTokenCompare(session.token, token)) {
-        session.status = "cancelled";
-        delete session.payload;
+      if (!session) {
+        return res.status(404).json({ success: false, error: "NOT_FOUND", message: "Transfer session not found or has expired." });
       }
+
+      if (!safeTokenCompare(session.token, token)) {
+        return res.status(403).json({ success: false, error: "UNAUTHORIZED", message: "Invalid session token." });
+      }
+
+      session.status = "cancelled";
+      delete session.payload;
 
       res.json({ success: true, message: "Transfer session cancelled." });
     } catch (_err: any) {

@@ -60,13 +60,24 @@ import {
   RefreshCw as RefreshIcon,
   EyeOff,
   ExternalLink,
-  Key
+  Key,
+  UploadCloud,
+  DownloadCloud,
+  Copy
 } from 'lucide-react';
 import { speechAssistant } from '../utils/speechAssistant';
 import { cancelHaptic } from '../utils/haptics';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
-import { GoogleAuthService, GoogleSyncStatus, GoogleUserProfile } from '../services/googleAuthService';
+import {
+  GoogleAuthService,
+  GoogleSyncStatus,
+  GoogleUserProfile,
+  DriveFileInfo
+} from '../services/googleAuthService';
 import { YouTubePlaylistService } from '../services/youtubePlaylistService';
+import { SongService } from '../services/songService';
+import { SongFamilyService } from '../services/songFamilyService';
+import { DriveBackupModal, DriveModalView } from './DriveBackupModal';
 
 
 interface SettingsModalProps {
@@ -122,9 +133,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [googleLastSync, setGoogleLastSync] = useState<string | null>(GoogleAuthService.getLastSyncedAt());
   const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
   const [showAdvancedGoogle, setShowAdvancedGoogle] = useState(false);
+  const [autoCloudSync, setAutoCloudSync] = useState(() => StorageService.getAutoCloudSync());
   const [clientIdInput, setClientIdInput] = useState(() => GoogleAuthService.getClientId());
   const [includeDraftCloud, setIncludeDraftCloud] = useState(() => StorageService.getIncludeDraftInCloudBackup());
   const isEnvClientIdConfigured = Boolean((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID);
+
+  // Drive Modal Dialog State
+  const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+  const [driveModalView, setDriveModalView] = useState<DriveModalView>('first_backup_confirm');
+  const [driveLocalCounts, setDriveLocalCounts] = useState<{
+    songs: number;
+    schedules: number;
+    members: number;
+    families: number;
+    labels: number;
+  }>();
+  const [driveCandidates, setDriveCandidates] = useState<DriveFileInfo[]>([]);
+  const [driveCandidateAction, setDriveCandidateAction] = useState<'save' | 'load'>('save');
+  const [drivePreviewData, setDrivePreviewData] = useState<{
+    file: DriveFileInfo;
+    envelope: any;
+    counts: {
+      songs: number;
+      schedules: number;
+      members: number;
+      families: number;
+      labels: number;
+      hasDraft: boolean;
+    };
+  } | null>(null);
 
   // YouTube API Key State
   const [youtubeKeyInput, setYoutubeKeyInput] = useState(() => YouTubePlaylistService.getStoredApiKey());
@@ -141,12 +178,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return unsubscribe;
   }, []);
 
+  // Listen for auto cloud sync changes from other tabs or components
+  useEffect(() => {
+    const handleAutoSyncChange = (e: any) => {
+      setAutoCloudSync(Boolean(e.detail?.enabled));
+    };
+    window.addEventListener('wwcf:auto-cloud-sync-changed', handleAutoSyncChange);
+    return () => {
+      window.removeEventListener('wwcf:auto-cloud-sync-changed', handleAutoSyncChange);
+    };
+  }, []);
+
   const handleConnectGoogle = async () => {
+    const clientId = GoogleAuthService.getClientId();
+    if (!clientId) {
+      showToast?.('Google OAuth Client ID is not configured. Please see Developer / Admin Override below.', 'info');
+      setShowAdvancedGoogle(true);
+      return;
+    }
+
     setIsSyncingGoogle(true);
     try {
-      await GoogleAuthService.requestToken();
-      showToast?.('Google Account connected. Checking Google Drive for backups...', 'info');
-      await GoogleAuthService.reconcileCloudBackup();
+      await GoogleAuthService.requestToken('', 'drive');
+      showToast?.('Connected to Google Account! Your data is safe in your personal Google Drive.', 'success');
     } catch (err: any) {
       showToast?.(err?.message || 'Google authorization failed', 'danger');
     } finally {
@@ -154,48 +208,165 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleSyncGoogleNow = async () => {
+  /**
+   * Independent Save to Drive action:
+   * Validates local data, checks Drive, confirms first backup if needed, and uploads without loading.
+   */
+  const handleSaveToDrive = async () => {
+    if (!GoogleAuthService.isConnected()) {
+      showToast?.('Please connect your Google Account first.', 'info');
+      return;
+    }
     setIsSyncingGoogle(true);
     try {
-      if (!GoogleAuthService.isDriveReconciled()) {
-        const recon = await GoogleAuthService.reconcileCloudBackup();
-        if (recon.state === 'no_backup') {
-          const res = await GoogleAuthService.confirmFirstBackup();
-          if (res.status === 'saved') {
-            showToast?.('Initial Google Drive cloud backup created successfully!', 'success');
-          } else {
-            showToast?.(res.error || 'Failed to initialize Google Drive backup', 'danger');
-          }
-          return;
-        } else if (recon.state === 'conflict') {
-          showToast?.('Cloud backup conflict detected. Please review and choose a resolution.', 'info');
-          return;
-        } else if (recon.state === 'multiple_candidates') {
-          showToast?.('Multiple backup files found in Drive. Please select one.', 'info');
-          return;
-        } else if (recon.state === 'error') {
-          showToast?.(recon.error || 'Failed to check Google Drive backup', 'danger');
-          return;
-        }
-      }
-
-      const res = await GoogleAuthService.syncNow();
+      const res = await GoogleAuthService.saveToDrive();
       if (res.status === 'saved') {
-        showToast?.('Google Drive cloud backup updated successfully!', 'success');
+        showToast?.('Current data successfully saved to Google Drive!', 'success');
+      } else if (res.status === 'first_backup_needed') {
+        setDriveLocalCounts(res.localCounts);
+        setDriveModalView('first_backup_confirm');
+        setIsDriveModalOpen(true);
+      } else if (res.status === 'candidates_found' && res.candidates) {
+        setDriveCandidates(res.candidates);
+        setDriveCandidateAction('save');
+        setDriveModalView('candidates_select');
+        setIsDriveModalOpen(true);
       } else if (res.status === 'conflict') {
-        showToast?.('Cloud backup conflict detected. Please review and choose a resolution.', 'info');
+        showToast?.('Cloud backup conflict detected. Please review changes before overwriting.', 'info');
       } else if (res.status === 'error') {
-        showToast?.(res.error || 'Failed to update Google Drive cloud backup', 'danger');
-      } else if (res.status === 'candidates_found') {
-        showToast?.('Multiple backup files found in Drive. Please select one.', 'info');
-      } else {
-        showToast?.(res.error || 'Google Drive backup not ready.', 'info');
+        showToast?.(res.error || 'Failed to save to Google Drive', 'danger');
       }
     } catch (err: any) {
-      showToast?.(err?.message || 'Cloud backup failed', 'danger');
+      showToast?.(err?.message || 'Save to Drive failed', 'danger');
     } finally {
       setIsSyncingGoogle(false);
     }
+  };
+
+  /**
+   * Independent Load from Drive action:
+   * Queries Drive, displays backup details & collection comparison, and offers Merge, Replace, or Cancel.
+   * Does NOT auto-upload or alter remote backup.
+   */
+  const handleLoadFromDrive = async () => {
+    if (!GoogleAuthService.isConnected()) {
+      showToast?.('Please connect your Google Account first.', 'info');
+      return;
+    }
+    setIsSyncingGoogle(true);
+    try {
+      // Gather local counts for comparison
+      const members = StorageService.getMembers();
+      const songs = await SongService.getSongs();
+      const schedules = StorageService.getSchedules();
+      const songFamilies = await SongFamilyService.getSongFamilies();
+      const labels = StorageService.getLabels();
+      setDriveLocalCounts({
+        songs: songs.length,
+        schedules: schedules.length,
+        members: members.length,
+        families: songFamilies.length,
+        labels: labels.length
+      });
+
+      const res = await GoogleAuthService.loadBackupPreview();
+      if (res.status === 'no_backups') {
+        setDriveModalView('no_backups');
+        setIsDriveModalOpen(true);
+      } else if (res.status === 'multiple_candidates' && res.candidates) {
+        setDriveCandidates(res.candidates);
+        setDriveCandidateAction('load');
+        setDriveModalView('candidates_select');
+        setIsDriveModalOpen(true);
+      } else if (res.status === 'ready' && res.file && res.counts) {
+        setDrivePreviewData({
+          file: res.file,
+          envelope: res.envelope,
+          counts: res.counts
+        });
+        setDriveModalView('load_preview');
+        setIsDriveModalOpen(true);
+      } else if (res.status === 'invalid_format') {
+        showToast?.(res.error || 'Remote backup has invalid format', 'danger');
+      } else if (res.status === 'error') {
+        showToast?.(res.error || 'Failed to inspect Google Drive backups', 'danger');
+      }
+    } catch (err: any) {
+      showToast?.(err?.message || 'Load from Drive failed', 'danger');
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  };
+
+  const handleConfirmFirstBackup = async () => {
+    const res = await GoogleAuthService.saveToDrive({ isFirstBackupConfirmed: true });
+    if (res.status === 'saved') {
+      showToast?.('Initial Google Drive cloud backup created successfully!', 'success');
+    } else {
+      throw new Error(res.error || 'Failed to create initial cloud backup');
+    }
+  };
+
+  const handleSelectCandidateInModal = async (fileId: string) => {
+    if (driveCandidateAction === 'save') {
+      const res = await GoogleAuthService.saveToDrive({ fileId, forceOverwrite: true });
+      if (res.status === 'saved') {
+        setIsDriveModalOpen(false);
+        showToast?.('Google Drive cloud backup updated successfully!', 'success');
+      } else {
+        throw new Error(res.error || 'Failed to update selected backup');
+      }
+    } else {
+      const res = await GoogleAuthService.loadBackupPreview(fileId);
+      if (res.status === 'ready' && res.file && res.counts) {
+        setDrivePreviewData({
+          file: res.file,
+          envelope: res.envelope,
+          counts: res.counts
+        });
+        setDriveModalView('load_preview');
+      } else {
+        throw new Error(res.error || 'Failed to load selected backup file');
+      }
+    }
+  };
+
+  const handleSaveAsSeparateCopy = async () => {
+    setIsSyncingGoogle(true);
+    try {
+      const res = await GoogleAuthService.createSeparateBackupCopy();
+      if (res.status === 'saved' && res.file) {
+        showToast?.(`Separate backup copy created: "${res.file.name}"`, 'success');
+      } else {
+        showToast?.(res.error || 'Failed to create separate copy', 'danger');
+      }
+    } catch (err: any) {
+      showToast?.(err?.message || 'Failed to create separate copy', 'danger');
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  };
+
+  const handleConfirmRestore = async (mode: 'replace' | 'merge') => {
+    if (!drivePreviewData?.file) return;
+    await GoogleAuthService.restoreFromBackup(drivePreviewData.file.id, mode);
+    showToast?.(
+      mode === 'merge'
+        ? 'Successfully merged cloud backup into this device!'
+        : 'Successfully replaced local database with cloud backup!',
+      'success'
+    );
+  };
+
+  const handleToggleAutoCloudSync = (enabled: boolean) => {
+    setAutoCloudSync(enabled);
+    StorageService.setAutoCloudSync(enabled);
+    showToast?.(
+      enabled
+        ? 'Automatic Cloud Backup enabled. Changes will be saved in the background.'
+        : 'Automatic Cloud Backup disabled. Use "Save to Drive" for manual backups.',
+      'info'
+    );
   };
 
   const handleDisconnectGoogle = () => {
@@ -1556,13 +1727,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             {googleStatus === 'connected' || googleStatus === 'saved' || googleStatus === 'syncing' ? (
-              <div className="space-y-2.5">
+              <div className="space-y-3">
+                {/* Account card */}
                 <div className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40">
                   <div className="flex items-center gap-2.5 min-w-0">
                     {googleProfile?.picture ? (
-                      <img src={googleProfile.picture} alt="" className="w-7 h-7 rounded-full shrink-0" />
+                      <img src={googleProfile.picture} alt="" className="w-8 h-8 rounded-full shrink-0" />
                     ) : (
-                      <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
                         {googleProfile?.name?.charAt(0) || 'G'}
                       </div>
                     )}
@@ -1586,63 +1758,156 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 px-1">
-                  <span>Last Cloud Sync:</span>
-                  <span className="font-semibold text-slate-900 dark:text-slate-200">
-                    {googleLastSync ? new Date(googleLastSync).toLocaleString() : 'Just now'}
-                  </span>
-                </div>
-
-                <div className="pt-1 border-t border-blue-100 dark:border-blue-900/40">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeDraftCloud}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIncludeDraftCloud(checked);
-                        StorageService.setIncludeDraftInCloudBackup(checked);
-                        showToast?.(
-                          checked
-                            ? 'Lineup draft will now be included in cloud backup.'
-                            : 'Lineup draft excluded from cloud backup.',
-                          'info'
-                        );
-                      }}
-                      className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    />
-                    <span className="text-xs text-slate-700 dark:text-slate-300">
-                      Include current lineup draft in cloud backup
+                {/* Scope authorization & Last Save Info */}
+                <div className="flex flex-col gap-1 text-[11px] px-1 bg-white/70 dark:bg-slate-900/60 p-2 rounded-lg border border-blue-100 dark:border-blue-950">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-semibold">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Personal Google Drive Authorized</span>
                     </span>
-                  </label>
+                    <span className="text-[10px] text-slate-400 font-mono">drive.file</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400 pt-0.5 border-t border-slate-100 dark:border-slate-800">
+                    <span>Last Drive Save:</span>
+                    <span className="font-semibold text-slate-900 dark:text-slate-200">
+                      {googleLastSync ? new Date(googleLastSync).toLocaleString() : 'Not yet saved to Drive'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex gap-2">
+                {/* Two Independent Actions: Save to Drive & Load from Drive */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
                   <button
                     type="button"
-                    onClick={handleSyncGoogleNow}
+                    onClick={handleSaveToDrive}
                     disabled={isSyncingGoogle}
-                    className="flex-1 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs disabled:opacity-60"
+                    className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-2xs hover:shadow disabled:opacity-60 group"
                   >
-                    <RefreshIcon className={`w-3.5 h-3.5 ${isSyncingGoogle ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingGoogle ? 'Syncing...' : 'Sync to Drive Now'}</span>
+                    <div className="flex items-center gap-1.5">
+                      <UploadCloud className={`w-4 h-4 ${isSyncingGoogle ? 'animate-bounce' : 'group-hover:-translate-y-0.5 transition-transform'}`} />
+                      <span>Save to Drive</span>
+                    </div>
+                    <span className="text-[10px] text-blue-100 font-normal">
+                      Upload current data to Google Drive
+                    </span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={handleLoadFromDrive}
+                    disabled={isSyncingGoogle}
+                    className="py-2.5 px-3 bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-750 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-bold text-xs rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-2xs hover:shadow disabled:opacity-60 group"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <DownloadCloud className={`w-4 h-4 ${isSyncingGoogle ? 'animate-bounce' : 'group-hover:translate-y-0.5 transition-transform'}`} />
+                      <span>Load from Drive</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                      Inspect & restore cloud backup
+                    </span>
+                  </button>
+                </div>
+
+                {/* Secondary Action: Save as Separate Copy */}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveAsSeparateCopy}
+                    disabled={isSyncingGoogle}
+                    className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Save as Separate Backup Copy</span>
+                  </button>
+                </div>
+
+                {/* Switches: Auto Cloud Backup & Include Draft */}
+                <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 space-y-2">
+                  <label className="flex items-start justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-900/60 transition-colors">
+                    <div className="min-w-0 pr-2">
+                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                        <RefreshIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Automatic Cloud Backup</span>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${autoCloudSync ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}`}>
+                          {autoCloudSync ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                        When enabled, changes to songs, lineups, and members automatically save to Google Drive in the background (default is OFF).
+                      </p>
+                    </div>
+                    <div className="shrink-0 pt-0.5">
+                      <Switch
+                        checked={autoCloudSync}
+                        onChange={() => handleToggleAutoCloudSync(!autoCloudSync)}
+                        label="Automatic Cloud Backup"
+                      />
+                    </div>
+                  </label>
+
+                  <label className="flex items-start justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-900/60 transition-colors">
+                    <div className="min-w-0 pr-2">
+                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        Include Lineup Draft in Cloud Backup
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                        Backs up your active, uncommitted scheduler draft so you can resume on another device.
+                      </p>
+                    </div>
+                    <div className="shrink-0 pt-0.5">
+                      <Switch
+                        checked={includeDraftCloud}
+                        onChange={() => {
+                          const next = !includeDraftCloud;
+                          setIncludeDraftCloud(next);
+                          StorageService.setIncludeDraftInCloudBackup(next);
+                          showToast?.(
+                            next
+                              ? 'Lineup draft will now be included in cloud backup.'
+                              : 'Lineup draft excluded from cloud backup.',
+                            'info'
+                          );
+                        }}
+                        label="Include Lineup Draft in Cloud Backup"
+                      />
+                    </div>
+                  </label>
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Sign in with Google to automatically back up your ministry data to personal Google Drive (<code className="text-[11px] bg-white dark:bg-slate-900 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-800">WWCF_Santa_Cruz_Worship_Ministry_Backup.json</code>) and import YouTube playlists without needing a manual API key.
+              <div className="space-y-3">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Connect your personal Google Account to save and load your ministry lineups, songs, and team records directly in your Google Drive (<code className="text-[11px] bg-white dark:bg-slate-900 px-1 py-0.5 rounded font-mono border border-slate-200 dark:border-slate-800">WWCF_Santa_Cruz_Worship_Ministry_Backup.json</code>) with zero server storage.
                 </p>
-                <button
-                  type="button"
-                  onClick={handleConnectGoogle}
-                  disabled={isSyncingGoogle}
-                  className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-2xs disabled:opacity-60"
-                >
-                  <Cloud className="w-4 h-4" />
-                  <span>{isSyncingGoogle ? 'Connecting...' : 'Connect Google Account'}</span>
-                </button>
+
+                {!GoogleAuthService.getClientId() ? (
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-bold">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Owner Configuration Required</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                      Google OAuth Web Client ID (<code className="font-mono">VITE_GOOGLE_CLIENT_ID</code>) has not been configured by the site administrator. You can configure a Developer / Admin Override below, or continue using the app fully offline.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedGoogle(true)}
+                      className="text-[11px] font-bold text-amber-900 dark:text-amber-200 underline hover:no-underline cursor-pointer"
+                    >
+                      Open Developer / Admin Override
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConnectGoogle}
+                    disabled={isSyncingGoogle}
+                    className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-2xs disabled:opacity-60"
+                  >
+                    <Cloud className="w-4 h-4" />
+                    <span>{isSyncingGoogle ? 'Connecting to Google...' : 'Connect Google Account'}</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -1851,5 +2116,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
 
   if (typeof document === 'undefined') return null;
-  return createPortal(modalContent, document.body);
+  return createPortal(
+    <>
+      {modalContent}
+      <DriveBackupModal
+        isOpen={isDriveModalOpen}
+        view={driveModalView}
+        onClose={() => setIsDriveModalOpen(false)}
+        localCounts={driveLocalCounts}
+        candidates={driveCandidates}
+        candidateAction={driveCandidateAction}
+        previewData={drivePreviewData}
+        onConfirmFirstBackup={handleConfirmFirstBackup}
+        onSelectCandidate={handleSelectCandidateInModal}
+        onSaveAsSeparateCopy={handleSaveAsSeparateCopy}
+        onConfirmRestore={handleConfirmRestore}
+        onTriggerSaveToDrive={handleSaveToDrive}
+        showToast={showToast || (() => {})}
+      />
+    </>,
+    document.body
+  );
 };

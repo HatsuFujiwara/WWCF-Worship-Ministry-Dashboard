@@ -34,13 +34,6 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
       alt="Word for the World Christian Fellowship - Santa Cruz"
       className={`${sizeClasses[size]} object-contain shrink-0 rounded-lg select-none`}
       loading="eager"
-      onError={(e) => {
-        // Fallback to wwcf-logo.png if needed
-        const target = e.target as HTMLImageElement;
-        if (!target.src.endsWith('wwcf-logo.png')) {
-          target.src = '/assets/wwcf-logo.png';
-        }
-      }}
     />
   );
 

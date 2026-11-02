@@ -317,8 +317,11 @@ export default function App() {
   }, []);
 
   // Trigger debounced cloud auto-sync when persisted local records change (NOT on transient editingSchedule state)
+  // Strictly checks whether user opted into automatic cloud backup
   useEffect(() => {
-    GoogleAuthService.triggerDebouncedAutoSync();
+    if (StorageService.getAutoCloudSync()) {
+      GoogleAuthService.triggerDebouncedAutoSync();
+    }
   }, [schedules, members, songs, labels, songFamilies]);
 
   useEffect(() => {

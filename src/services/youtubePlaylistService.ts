@@ -144,26 +144,38 @@ export function parseISO8601Duration(isoDuration?: string): string {
  */
 export function calculateTotalDuration(items: PlaylistItem[]): string {
   let totalSec = 0;
+  let hasKnownDuration = false;
+  let allKnown = true;
+
   items.forEach((item) => {
     if (item.duration) {
       const parts = item.duration.split(':').map(Number);
-      if (parts.length === 3) {
+      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
         totalSec += parts[0] * 3600 + parts[1] * 60 + parts[2];
-      } else if (parts.length === 2) {
+        hasKnownDuration = true;
+      } else if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         totalSec += parts[0] * 60 + parts[1];
+        hasKnownDuration = true;
+      } else {
+        allKnown = false;
       }
     } else {
-      totalSec += 225; // default estimate
+      allKnown = false;
     }
   });
 
+  if (!hasKnownDuration || totalSec === 0) {
+    return 'Duration unavailable';
+  }
+
   const mins = Math.round(totalSec / 60);
+  const prefix = allKnown ? '' : '~';
   if (mins < 60) {
-    return `${mins} mins`;
+    return `${prefix}${mins} mins`;
   }
   const hours = Math.floor(mins / 60);
   const remMins = mins % 60;
-  return `${hours} hr${hours > 1 ? 's' : ''} ${remMins} min${remMins !== 1 ? 's' : ''}`;
+  return `${prefix}${hours} hr${hours > 1 ? 's' : ''} ${remMins} min${remMins !== 1 ? 's' : ''}`;
 }
 
 /**
@@ -329,15 +341,11 @@ export class YouTubePlaylistService {
       return await this.fetchViaOfficialYouTubeAPI(playlistId, cleanPlaylistUrl, resolvedKey, undefined);
     }
 
-    // 3. Fallback mirrors (only as last resort)
-    try {
-      return await this.fetchViaFallbackProxies(playlistId, cleanPlaylistUrl);
-    } catch {
-      throw new YouTubeApiException(
-        'YOUTUBE_API_KEY_MISSING',
-        'A YouTube Data API v3 key or authorized Google Account is required to import playlists. Click "Connect Google" or "Get / Manage YouTube API Key" to configure your credentials.'
-      );
-    }
+    // Official credentials required - no unofficial third-party proxies
+    throw new YouTubeApiException(
+      'YOUTUBE_API_KEY_MISSING',
+      'A YouTube Data API v3 key or authorized Google Account is required to import playlists. Click "Connect Google" or "Get / Manage YouTube API Key" to configure your credentials.'
+    );
   }
 
   /**
@@ -641,7 +649,7 @@ export class YouTubePlaylistService {
         title: item.title,
         artist: details?.artist && item.artist === 'Unknown Artist' ? details.artist : item.artist,
         album: playlistName,
-        duration: details?.duration || '3:45',
+        duration: details?.duration || '',
         thumbnailUrl: item.thumbnailUrl,
         playlistPosition: item.position
       };
@@ -663,125 +671,6 @@ export class YouTubePlaylistService {
       estimatedTotalDuration: calculateTotalDuration(playlistItems),
       isComplete: !pageToken
     };
-  }
-
-  /**
-   * Emergency fallback method using public endpoints only when no API key is configured.
-   * Strictly validates that real, playable video items are returned.
-   */
-  private static async fetchViaFallbackProxies(
-    playlistId: string,
-    cleanPlaylistUrl: string
-  ): Promise<YouTubePlaylistPreview> {
-    const endpoints = [
-      `https://pipedapi.kavin.rocks/playlists/${playlistId}`,
-      `https://api.piped.private.coffee/playlists/${playlistId}`,
-      `https://invidious.nerdvpn.de/api/v1/playlists/${playlistId}`,
-      `https://vid.puffyan.us/api/v1/playlists/${playlistId}`
-    ];
-
-    let fetchedData: any = null;
-
-    for (const ep of endpoints) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
-        const res = await fetch(ep, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const json = await res.json();
-          const candidateVideos = json?.relatedStreams || json?.videos || [];
-          if (Array.isArray(candidateVideos) && candidateVideos.length > 0) {
-            fetchedData = json;
-            break;
-          }
-        }
-      } catch (e: any) {
-        console.warn(`[YouTubePlaylistService] Fallback endpoint ${ep} failed:`, e.message);
-      }
-    }
-
-    if (fetchedData) {
-      const playlistName = fetchedData.title || fetchedData.playlistName || 'Worship Playlist';
-      const playlistThumbnail =
-        fetchedData.thumbnailUrl ||
-        fetchedData.bannerUrl ||
-        (fetchedData.relatedStreams && fetchedData.relatedStreams[0]?.thumbnail) ||
-        `https://img.youtube.com/vi/${fetchedData.relatedStreams?.[0]?.url?.split('v=')?.[1] || 'default'}/hqdefault.jpg`;
-
-      const rawVideos = (fetchedData.relatedStreams || fetchedData.videos || []).filter(
-        (v: any) => v && (v.title || v.videoId || v.url)
-      );
-
-      if (rawVideos.length === 0) {
-        throw new YouTubeApiException(
-          'YOUTUBE_PLAYLIST_EMPTY',
-          'This playlist is accessible but contains no importable songs.'
-        );
-      }
-
-      const items: PlaylistItem[] = [];
-      let skippedUnavailable = 0;
-
-      for (let index = 0; index < rawVideos.length; index++) {
-        const v = rawVideos[index];
-        let videoId = '';
-        if (v.url) {
-          const match = v.url.match(/v=([^&]+)/);
-          if (match && match[1]?.length === 11) videoId = match[1];
-        }
-        if (!videoId && v.videoId && v.videoId.length === 11) {
-          videoId = v.videoId;
-        }
-
-        if (!videoId) {
-          skippedUnavailable++;
-          continue; // Never create fake synthetic IDs
-        }
-
-        const { title, artist } = parseYouTubeTitle(v.title || 'Untitled Song', v.uploaderName || v.author);
-        const durationSec = typeof v.duration === 'number' ? v.duration : parseInt(v.duration || '210', 10);
-        const thumbnailUrl =
-          v.thumbnail || v.videoThumbnails?.[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
-        items.push({
-          videoId,
-          youtubeUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          title,
-          artist,
-          album: v.album || playlistName,
-          duration: formatDuration(durationSec),
-          thumbnailUrl,
-          playlistPosition: items.length + 1
-        });
-      }
-
-      if (items.length === 0) {
-        throw new YouTubeApiException(
-          'YOUTUBE_PLAYLIST_ITEMS_UNAVAILABLE',
-          'No playable videos could be parsed from this playlist.'
-        );
-      }
-
-      return {
-        playlistId,
-        playlistName,
-        playlistThumbnail,
-        playlistUrl: cleanPlaylistUrl,
-        privacyStatus: 'public',
-        itemCount: items.length + skippedUnavailable,
-        items,
-        totalSongs: items.length,
-        skippedUnavailable,
-        estimatedTotalDuration: calculateTotalDuration(items)
-      };
-    }
-
-    throw new YouTubeApiException(
-      'YOUTUBE_API_KEY_MISSING',
-      `Unable to fetch playlist "${playlistId}". Please configure an official YouTube Data API v3 key.`
-    );
   }
 
   /**

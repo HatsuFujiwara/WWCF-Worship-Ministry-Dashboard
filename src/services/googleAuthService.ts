@@ -69,6 +69,37 @@ export interface SyncResult {
   error?: string;
 }
 
+export interface SaveToDriveResult {
+  status: 'saved' | 'first_backup_needed' | 'conflict' | 'candidates_found' | 'error' | 'not_ready';
+  file?: DriveFileInfo;
+  candidates?: DriveFileInfo[];
+  localCounts?: {
+    songs: number;
+    schedules: number;
+    members: number;
+    families: number;
+    labels: number;
+  };
+  conflictPayload?: RemoteConflictPayload;
+  error?: string;
+}
+
+export interface BackupPreviewResult {
+  status: 'ready' | 'no_backups' | 'multiple_candidates' | 'invalid_format' | 'error';
+  file?: DriveFileInfo;
+  candidates?: DriveFileInfo[];
+  envelope?: any;
+  counts?: {
+    songs: number;
+    schedules: number;
+    members: number;
+    families: number;
+    labels: number;
+    hasDraft: boolean;
+  };
+  error?: string;
+}
+
 export type GoogleAuthListener = (state: {
   status: GoogleSyncStatus;
   profile: GoogleUserProfile | null;
@@ -520,11 +551,11 @@ export class GoogleAuthService {
   }
 
   /**
-   * Search for all existing backup files named WWCF_Santa_Cruz_Worship_Ministry_Backup.json in user's Drive
+   * Search for all backup files matching WWCF backup names in user's Drive, ordered by most recently modified first
    */
   static async searchDriveBackupFiles(token: string): Promise<DriveFileInfo[]> {
-    const query = encodeURIComponent(`name = '${BACKUP_FILENAME}' and trashed = false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime,version,size,mimeType)&spaces=drive`;
+    const query = encodeURIComponent(`(name = '${BACKUP_FILENAME}' or name contains 'WWCF_Santa_Cruz_Worship_Ministry_Backup') and trashed = false`);
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime,version,size,mimeType)&spaces=drive&orderBy=modifiedTime desc`;
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
@@ -537,6 +568,15 @@ export class GoogleAuthService {
 
     const data = await res.json();
     return data.files || [];
+  }
+
+  /**
+   * Public helper to list all Drive backup candidates
+   */
+  static async listDriveBackups(): Promise<DriveFileInfo[]> {
+    const token = this.getAccessToken();
+    if (!token) throw new Error('Not authenticated with Google');
+    return this.searchDriveBackupFiles(token);
   }
 
   /**
@@ -554,7 +594,8 @@ export class GoogleAuthService {
   }
 
   /**
-   * Compiles current local database into the standard WWCF backup envelope
+   * Compiles current local database into the standard WWCF backup envelope,
+   * strictly validating structural schema before returning.
    */
   static async buildLocalBackupPayload(): Promise<any> {
     const members = StorageService.getMembers();
@@ -565,7 +606,7 @@ export class GoogleAuthService {
     const includeDraft = StorageService.getIncludeDraftInCloudBackup();
     const draftSchedule = includeDraft ? StorageService.getDraftSchedule() : null;
 
-    return {
+    const payload = {
       app: 'WWCF Santa Cruz Worship Ministry',
       version: '1.0',
       exportedAt: new Date().toISOString(),
@@ -578,6 +619,13 @@ export class GoogleAuthService {
         ...(includeDraft && draftSchedule ? { draftSchedule } : {})
       }
     };
+
+    const validation = BackupValidationService.validate(payload);
+    if (!validation.isValid) {
+      throw new Error(`Local data failed backup validation: ${validation.error || 'schema mismatch'}`);
+    }
+
+    return payload;
   }
 
   /**
@@ -884,6 +932,254 @@ export class GoogleAuthService {
   }
 
   /**
+   * Save to Drive (independent user action):
+   * 1. Checks Google auth + Drive scope.
+   * 2. Validates local data schema via BackupValidationService.
+   * 3. Checks Drive for existing backup files:
+   *    - If 0 found: requires first-backup confirmation with record counts.
+   *    - If > 1 found and no target specified: prompts candidate selector.
+   *    - If 1 found: executes read-before-write concurrency baseline check.
+   * 4. Uploads to Drive and updates persisted file ID and modified baseline.
+   */
+  static async saveToDrive(options?: {
+    forceOverwrite?: boolean;
+    fileId?: string;
+    isFirstBackupConfirmed?: boolean;
+  }): Promise<SaveToDriveResult> {
+    const token = this.getAccessToken();
+    if (!token) {
+      return { status: 'not_ready', error: 'Not authenticated with Google' };
+    }
+    if (!this.hasScope('drive')) {
+      return { status: 'error', error: 'Google Drive authorization is missing. Please reconnect with Drive permissions.' };
+    }
+
+    // Build and validate local payload
+    let localPayload: any;
+    try {
+      localPayload = await this.buildLocalBackupPayload();
+    } catch (err: any) {
+      return { status: 'error', error: err?.message || 'Local data validation failed' };
+    }
+
+    const members = StorageService.getMembers();
+    const songs = await SongService.getSongs();
+    const schedules = StorageService.getSchedules();
+    const songFamilies = await SongFamilyService.getSongFamilies();
+    const labels = StorageService.getLabels();
+
+    const localCounts = {
+      songs: songs.length,
+      schedules: schedules.length,
+      members: members.length,
+      families: songFamilies.length,
+      labels: labels.length
+    };
+
+    if (isSyncInProgress) {
+      return { status: 'not_ready', error: 'A Drive operation is already in progress' };
+    }
+
+    isSyncInProgress = true;
+    currentSyncStatus = 'syncing';
+    this.notifyState();
+
+    try {
+      const files = await this.searchDriveBackupFiles(token);
+
+      // Scenario 1: No backup exists in Drive
+      if (files.length === 0) {
+        if (!options?.isFirstBackupConfirmed) {
+          isSyncInProgress = false;
+          currentSyncStatus = 'connected';
+          this.notifyState();
+          return {
+            status: 'first_backup_needed',
+            localCounts
+          };
+        }
+        // User confirmed creating first backup: create new file in Drive
+        const createdFile = await this.uploadToDrive(token, localPayload);
+        this.setPersistedDriveFileId(createdFile.id);
+        this.setRemoteModifiedTime(createdFile.modifiedTime);
+        const nowIso = new Date().toISOString();
+        this.setLastSyncedAt(nowIso);
+        isReconciled = true;
+        currentSyncStatus = 'saved';
+        this.notifyState();
+        return { status: 'saved', file: createdFile };
+      }
+
+      // Scenario 2: Multiple files found and no target specified
+      if (files.length > 1 && !options?.fileId && !this.getPersistedDriveFileId()) {
+        isSyncInProgress = false;
+        currentSyncStatus = 'conflict';
+        this.notifyState();
+        candidateListeners.forEach((l) => l(files));
+        return { status: 'candidates_found', candidates: files };
+      }
+
+      // Scenario 3: Target file identified
+      const targetFile =
+        (options?.fileId && files.find((f) => f.id === options.fileId)) ||
+        (this.getPersistedDriveFileId() && files.find((f) => f.id === this.getPersistedDriveFileId())) ||
+        files[0];
+
+      // Read-before-write concurrency check
+      const lastKnownModified = this.getRemoteModifiedTime();
+      if (!options?.forceOverwrite && (!lastKnownModified || targetFile.modifiedTime > lastKnownModified)) {
+        let remoteContent: any = null;
+        try {
+          remoteContent = await this.readDriveBackupContent(token, targetFile.id);
+        } catch (rErr: any) {
+          isSyncInProgress = false;
+          currentSyncStatus = 'error';
+          const errMsg = `Conflict check failed: unable to read remote backup (${rErr?.message || 'network error'}). Write aborted for safety.`;
+          this.notifyState(errMsg);
+          return { status: 'error', error: errMsg };
+        }
+
+        if (remoteContent && remoteContent.data) {
+          isSyncInProgress = false;
+          isReconciled = false;
+          currentSyncStatus = 'conflict';
+          this.notifyState();
+          const conflictPayload: RemoteConflictPayload = {
+            fileId: targetFile.id,
+            remoteModifiedTime: targetFile.modifiedTime,
+            candidateFiles: files.length > 1 ? files : undefined,
+            remoteData: remoteContent
+          };
+          conflictListeners.forEach((l) => l(conflictPayload));
+          return { status: 'conflict', file: targetFile, conflictPayload };
+        }
+      }
+
+      // Upload update to existing file
+      const updatedFile = await this.uploadToDrive(token, localPayload, targetFile.id);
+      this.setPersistedDriveFileId(updatedFile.id);
+      this.setRemoteModifiedTime(updatedFile.modifiedTime);
+      const nowIso = new Date().toISOString();
+      this.setLastSyncedAt(nowIso);
+      isReconciled = true;
+      currentSyncStatus = 'saved';
+      this.notifyState();
+      return { status: 'saved', file: updatedFile };
+    } catch (err: any) {
+      console.error('Save to Drive error:', err);
+      currentSyncStatus = 'error';
+      const msg = err?.message || 'Failed to save to Drive';
+      this.notifyState(msg);
+      return { status: 'error', error: msg };
+    } finally {
+      isSyncInProgress = false;
+    }
+  }
+
+  /**
+   * Load from Drive Preview (independent user action):
+   * 1. Checks Google auth + Drive scope.
+   * 2. Inspects user's Drive for backup files.
+   * 3. If 0 found: returns status 'no_backups'.
+   * 4. If > 1 found and no fileId: returns status 'multiple_candidates'.
+   * 5. If 1 found (or fileId specified): downloads and validates with BackupValidationService.
+   * 6. Returns file info, schema version, and collection counts for UI comparison.
+   */
+  static async loadBackupPreview(fileId?: string): Promise<BackupPreviewResult> {
+    const token = this.getAccessToken();
+    if (!token) {
+      return { status: 'error', error: 'Not authenticated with Google' };
+    }
+    if (!this.hasScope('drive')) {
+      return { status: 'error', error: 'Google Drive authorization is missing. Please reconnect with Drive permissions.' };
+    }
+
+    try {
+      const files = await this.searchDriveBackupFiles(token);
+
+      if (files.length === 0) {
+        return { status: 'no_backups' };
+      }
+
+      if (files.length > 1 && !fileId) {
+        return { status: 'multiple_candidates', candidates: files };
+      }
+
+      const targetFile =
+        (fileId && files.find((f) => f.id === fileId)) ||
+        (this.getPersistedDriveFileId() && files.find((f) => f.id === this.getPersistedDriveFileId())) ||
+        files[0];
+
+      const remoteContent = await this.readDriveBackupContent(token, targetFile.id);
+      const validation = BackupValidationService.validate(remoteContent);
+      if (!validation.isValid || !validation.envelope) {
+        return {
+          status: 'invalid_format',
+          file: targetFile,
+          candidates: files,
+          error: validation.error || 'Remote file does not contain a valid WWCF backup envelope'
+        };
+      }
+
+      const envelope = validation.envelope;
+      const data = envelope.data || {};
+      const counts = {
+        songs: (data.songs || []).length,
+        schedules: (data.schedules || []).length,
+        members: (data.members || []).length,
+        families: (data.songFamilies || []).length,
+        labels: (data.labels || []).length,
+        hasDraft: Boolean(data.draftSchedule)
+      };
+
+      return {
+        status: 'ready',
+        file: targetFile,
+        candidates: files,
+        envelope,
+        counts
+      };
+    } catch (err: any) {
+      console.error('Load backup preview error:', err);
+      return { status: 'error', error: err?.message || 'Failed to inspect cloud backup' };
+    }
+  }
+
+  /**
+   * Restores a chosen backup file from Google Drive into local storage.
+   * Mode: 'replace' | 'merge'.
+   * STRICT SAFETY: Does NOT trigger an auto-upload or auto-sync afterward.
+   */
+  static async restoreFromBackup(
+    fileId: string,
+    mode: 'replace' | 'merge'
+  ): Promise<void> {
+    const token = this.getAccessToken();
+    if (!token) throw new Error('Not authenticated with Google');
+
+    const files = await this.searchDriveBackupFiles(token);
+    const targetFile = files.find((f) => f.id === fileId) || {
+      id: fileId,
+      name: BACKUP_FILENAME,
+      modifiedTime: new Date().toISOString()
+    };
+
+    const remoteContent = await this.readDriveBackupContent(token, fileId);
+    await this.applyCloudRestore(remoteContent, mode, targetFile.modifiedTime);
+
+    this.setPersistedDriveFileId(targetFile.id);
+    this.setRemoteModifiedTime(targetFile.modifiedTime);
+    this.setLastSyncedAt(new Date().toISOString());
+    isReconciled = true;
+    currentSyncStatus = 'saved';
+    this.notifyState();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('wwcf:cloud-restored', { detail: { mode, fileId } }));
+    }
+  }
+
+  /**
    * Applies cloud restore to local storage with transactional rollback safeguards:
    * 1. Validates the versioned envelope.
    * 2. Takes a complete snapshot of local state.
@@ -991,10 +1287,12 @@ export class GoogleAuthService {
   }
 
   /**
-   * Schedules a debounced background sync when local data changes
+   * Schedules a debounced background sync when local data changes,
+   * ONLY if the user has explicitly enabled Automatic Cloud Backup in Settings.
    */
   static triggerDebouncedAutoSync(): void {
     if (!this.isConnected()) return;
+    if (!StorageService.getAutoCloudSync()) return;
     if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
     autoSyncTimeout = setTimeout(() => {
       this.syncNow().catch((e) => console.warn('Debounced auto-sync error:', e));

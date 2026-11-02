@@ -52,12 +52,8 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
         return item;
       }
       // Fallback initialization rule:
-      // If exactly 2 songs: Song 1 -> praise, Song 2 -> worship
-      // If 3+ songs: Song 1 & 2 -> praise, Song 3+ -> worship
-      const fallbackCat: 'praise' | 'worship' =
-        items.length === 2
-          ? (idx === 0 ? 'praise' : 'worship')
-          : (idx < 2 ? 'praise' : 'worship');
+      // 1st & 2nd = Praise, 3rd+ = Worship (for 2 songs: both Praise)
+      const fallbackCat: 'praise' | 'worship' = idx < 2 ? 'praise' : 'worship';
       return {
         ...item,
         category: fallbackCat

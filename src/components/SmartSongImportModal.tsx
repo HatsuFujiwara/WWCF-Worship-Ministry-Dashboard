@@ -496,7 +496,7 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
         key: key.trim(),
         originalKey: key.trim(),
         versionType: finalVersionType,
-        duration: duration.trim() || '3:45',
+        ...(duration.trim() ? { duration: duration.trim() } : {}),
         category: category,
         language: sanitizeSongLanguage(language),
         youtubeUrl: youtubeUrl.trim(),
