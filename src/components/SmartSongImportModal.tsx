@@ -42,6 +42,7 @@ import { detectSongVersionType } from '../utils/versionDetectionUtils';
 import { detectYouTubeImportType, DetectedImportType } from '../utils/importUrlUtils';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import { SwapTitleArtistButton } from './SwapTitleArtistButton';
+import { GoogleAuthService } from '../services/googleAuthService';
 
 export interface SmartSongImportModalProps {
   isOpen: boolean;
@@ -123,7 +124,9 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
   const [familyRelationship, setFamilyRelationship] = useState<SongRelationshipType>('COVER');
 
   // Playlist State
-  const [apiKey, setApiKey] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('YOUTUBE_API_KEY') : null) || (import.meta as any).env?.VITE_YOUTUBE_API_KEY || '');
+  const [apiKey, setApiKey] = useState(() => YouTubePlaylistService.getStoredApiKey());
+  const [rememberApiKey, setRememberApiKey] = useState(() => YouTubePlaylistService.isKeyRemembered());
+  const [acknowledgeIncomplete, setAcknowledgeIncomplete] = useState(false);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [serverKeyStatus, setServerKeyStatus] = useState<{ configured: boolean; provider: string } | null>(null);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
@@ -155,6 +158,7 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
       setDetectedType(null);
       setSecondaryVideoId(null);
       setIsEditingSong(true);
+      setAcknowledgeIncomplete(false);
 
       // Check server API key configuration
       YouTubePlaylistService.checkServerStatus()
@@ -210,10 +214,23 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
 
   const handleApiKeyChange = (val: string) => {
     setApiKey(val);
-    if (val.trim()) {
-      localStorage.setItem('YOUTUBE_API_KEY', val.trim());
-    } else {
-      localStorage.removeItem('YOUTUBE_API_KEY');
+    YouTubePlaylistService.setApiKey(val, rememberApiKey);
+  };
+
+  const handleToggleRememberKey = (checked: boolean) => {
+    setRememberApiKey(checked);
+    YouTubePlaylistService.setApiKey(apiKey, checked);
+  };
+
+  const handleAuthorizeYouTube = async () => {
+    try {
+      setIsLoading(true);
+      await GoogleAuthService.requestToken('', 'youtube');
+      showToast('YouTube playlist authorization granted!', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to authorize YouTube access', 'danger');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -335,7 +352,10 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
       // CASE B: PLAYLIST WORKFLOW
       // ==========================================
       try {
-        const data = await YouTubePlaylistService.fetchPlaylistPreview(raw, apiKey);
+        const hasYtScope = GoogleAuthService.hasScope('youtube');
+        const oauthToken = (hasYtScope && GoogleAuthService.getAccessToken()) || undefined;
+        const activeKey = (apiKey || '').trim() || YouTubePlaylistService.getStoredApiKey();
+        const data = await YouTubePlaylistService.fetchPlaylistPreview(raw, activeKey, oauthToken);
         if (!data || !data.items || data.items.length === 0) {
           setErrorMsg('The playlist was found, but contains no public, playable videos.');
           return;
@@ -343,19 +363,9 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
 
         // Initialize preview items with their default category ONCE upon fetch:
         // Rule:
-        // EXACTLY 2 SONGS:
-        // Song 1 (idx 0) -> Praise
-        // Song 2 (idx 1) -> Worship
-        // 3 OR MORE SONGS:
-        // Song 1 & 2 (idx 0, 1) -> Praise
-        // Song 3+ (idx >= 2) -> Worship
+        // 1st & 2nd song Praise / 3rd+ Worship (for 2 songs: both Praise)
         const initializedItems: PlaylistItem[] = data.items.map((item, idx) => {
-          let cat: 'praise' | 'worship';
-          if (data.items.length === 2) {
-            cat = idx === 0 ? 'praise' : 'worship';
-          } else {
-            cat = idx < 2 ? 'praise' : 'worship';
-          }
+          const cat: 'praise' | 'worship' = idx < 2 ? 'praise' : 'worship';
           return {
             ...item,
             category: cat
@@ -756,18 +766,38 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                   </button>
                 </div>
 
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between">
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 flex flex-wrap items-center justify-between gap-1">
                   <span>
                     Auto-detects songs (<code className="text-slate-600 dark:text-slate-300">watch?v=...</code> / <code className="text-slate-600 dark:text-slate-300">youtu.be/...</code>) and playlists (<code className="text-slate-600 dark:text-slate-300">playlist?list=...</code>).
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                    className="text-[11px] text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium underline cursor-pointer ml-2"
-                  >
-                    {showApiKeyInput ? 'Hide API Key' : 'API Key (Optional)'}
-                  </button>
-                </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {GoogleAuthService.isConnected() ? (
+                      GoogleAuthService.hasScope('youtube') ? (
+                        <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          YouTube Authorized (Google Account)
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleAuthorizeYouTube}
+                          disabled={isLoading}
+                          className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:text-amber-800 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 px-2 py-0.5 rounded cursor-pointer flex items-center gap-1"
+                        >
+                          <Youtube className="w-3 h-3 text-red-500" />
+                          <span>Authorize YouTube with Google</span>
+                        </button>
+                      )
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium underline cursor-pointer"
+                    >
+                      {showApiKeyInput ? 'Hide API Key' : 'API Key (Optional)'}
+                    </button>
+                  </div>
+                </div>
 
                 {/* Switch to single song if URL has both v= and list= */}
                 {secondaryVideoId && (
@@ -841,6 +871,15 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                         {showSetupGuide ? 'Hide Setup Help' : 'Setup Help'}
                       </button>
                     </div>
+                    <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={rememberApiKey}
+                        onChange={(e) => handleToggleRememberKey(e.target.checked)}
+                        className="rounded border-slate-300 dark:border-slate-750 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                      <span>Remember this YouTube API key on this device (optional)</span>
+                    </label>
                   </div>
 
                   {/* Step-by-Step Setup Help */}
@@ -1164,10 +1203,12 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                         <Music className="w-8 h-8" />
                       </div>
                     )}
-                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-white text-[9px] font-bold flex items-center gap-0.5">
-                      <Youtube className="w-2.5 h-2.5 text-red-500" />
-                      <span>{duration || '3:45'}</span>
-                    </div>
+                    {duration && (
+                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-white text-[9px] font-bold flex items-center gap-0.5">
+                        <Youtube className="w-2.5 h-2.5 text-red-500" />
+                        <span>{duration}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Song Core Info */}
@@ -1603,6 +1644,27 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                 </div>
               </div>
 
+              {/* Incomplete Playlist Warning Banner */}
+              {playlistPreview.isComplete === false && (
+                <div className="p-3.5 bg-amber-50/90 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200 space-y-2.5">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-bold">Incomplete playlist:</strong> retrieved {previewItems.length} of {playlistPreview.itemCount || previewItems.length} items. Some items could not be loaded due to quota or access limits.
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 pt-1 font-semibold text-amber-900 dark:text-amber-100 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={acknowledgeIncomplete}
+                      onChange={(e) => setAcknowledgeIncomplete(e.target.checked)}
+                      className="rounded border-amber-300 dark:border-amber-700 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <span>I understand this playlist is incomplete and wish to proceed with importing available songs.</span>
+                  </label>
+                </div>
+              )}
+
               {/* Selection Controls */}
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
@@ -1628,6 +1690,11 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                 selectedMap={selectedItemsMap}
                 onToggleItem={handleTogglePlaylistItem}
                 onReorder={(newItems) => setPreviewItems(newItems)}
+                onUpdateItem={(updated) => {
+                  setPreviewItems((prev) =>
+                    prev.map((item) => (item.videoId === updated.videoId ? updated : item))
+                  );
+                }}
               />
 
               {/* Playlist Action Buttons */}
@@ -1644,8 +1711,8 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                 <button
                   type="button"
                   onClick={handleExecutePlaylistImport}
-                  disabled={isImportingPlaylist || selectedPlaylistCount === 0}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                  disabled={isImportingPlaylist || selectedPlaylistCount === 0 || (playlistPreview.isComplete === false && !acknowledgeIncomplete)}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
                 >
                   {isImportingPlaylist ? (
                     <>

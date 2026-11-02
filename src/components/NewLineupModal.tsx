@@ -456,7 +456,7 @@ export const NewLineupModal: React.FC<NewLineupModalProps> = ({
                   <option value="Sunday Service">Sunday Service</option>
                   <option value="Midweek Prayer Service">Midweek Prayer Service</option>
                   <option value="Youth Fellowship">Youth Fellowship</option>
-                  <option value="Special Worship Event">Special Worship Event</option>
+                  <option value="Worship Event">Worship Event</option>
                   <option value="Custom...">Custom Service...</option>
                 </select>
               </div>

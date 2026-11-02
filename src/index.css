@@ -786,4 +786,18 @@ html.density-spacious .space-y-4 > * + * {
   border-width: 1.5px !important;
 }
 
+/* ==========================================================================
+   Accessibility: Reading / Cognitive Focus Mode
+   ========================================================================== */
+html.reading-mode body {
+  line-height: 1.65 !important;
+  letter-spacing: 0.015em !important;
+}
+html.reading-mode p,
+html.reading-mode span,
+html.reading-mode li {
+  line-height: 1.65 !important;
+}
+
+
 

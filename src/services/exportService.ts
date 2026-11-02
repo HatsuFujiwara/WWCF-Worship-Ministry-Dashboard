@@ -1,5 +1,3 @@
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { Schedule, MinistryAssignment, getAssignmentMembers } from '../types';
 import { formatDateDisplayManila } from '../utils/dateUtils';
 import { resolveScheduleSongTitles } from '../utils/songResolveUtils';
@@ -386,6 +384,9 @@ async function renderCanvas(schedule: Schedule): Promise<HTMLCanvasElement> {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
 
+    const html2canvasModule = await import('html2canvas');
+    const html2canvas = (html2canvasModule as any).default || html2canvasModule;
+
     const canvas = await html2canvas(element, {
       scale: 3, // High resolution for mobile sharing & printing
       useCORS: true,
@@ -424,12 +425,13 @@ export function getExportFilename(schedule: Schedule, extension: 'pdf' | 'png'):
   } else if (serviceType === 'Midweek Prayer Service') {
     prefix = 'Midweek_Prayer_Service_Line-up';
   } else if (serviceType === 'Youth Fellowship' || serviceType === 'Youth Service') {
-    prefix = 'Youth_Fellowship';
+    prefix = 'Youth_Fellowship_Line-up';
   } else if (serviceType === 'Worship Event' || serviceType === 'Special Worship Event') {
-    prefix = 'Worship_Event';
+    prefix = 'Worship_Event_Line-up';
   } else {
-    // Fallback: replace spaces with underscores
-    prefix = serviceType.replace(/\s+/g, '_');
+    // Fallback: replace spaces with underscores and ensure Line-up suffix
+    const cleanType = serviceType.replace(/\s+/g, '_');
+    prefix = cleanType.endsWith('_Line-up') ? cleanType : `${cleanType}_Line-up`;
   }
 
   return `${prefix}_(${formattedDate}).${extension}`;
@@ -454,6 +456,9 @@ export async function exportLineupAsPNG(schedule: Schedule): Promise<void> {
  */
 export async function exportLineupAsPDF(schedule: Schedule): Promise<void> {
   const canvas = await renderCanvas(schedule);
+
+  const jsPdfModule = await import('jspdf');
+  const jsPDF = (jsPdfModule as any).default || jsPdfModule.jsPDF;
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm

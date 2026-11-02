@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Schedule, formatAssignmentMemberNames, Song } from '../types';
+import { Schedule, formatAssignmentMemberNames, Song, normalizeServiceType } from '../types';
 import { getScheduleRepeatedSongs, ensureMonthlyPlaceholders, isScheduleEmpty } from '../utils/scheduleUtils';
 import { formatDateDisplayManila, getManilaTodayString, getManilaDateParts } from '../utils/dateUtils';
 import { resolveScheduleSongTitles } from '../utils/songResolveUtils';
@@ -236,12 +236,14 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
     const defaultTypes = [
       'Sunday Service',
       'Midweek Prayer Service',
-      'Youth Service',
-      'Special Worship Event'
+      'Youth Fellowship',
+      'Worship Event'
     ];
     const set = new Set<string>(defaultTypes);
     schedules.forEach((s) => {
-      if (s.serviceType) set.add(s.serviceType);
+      if (s.serviceType) {
+        set.add(normalizeServiceType(s.serviceType));
+      }
     });
     return Array.from(set);
   }, [schedules]);
@@ -267,9 +269,13 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
     const query = searchQuery.toLowerCase().trim();
 
     const filtered = schedules.filter((s) => {
-      // Service filter
-      if (serviceFilter !== 'all' && s.serviceType !== serviceFilter) {
-        return false;
+      // Service filter (matches canonical and legacy aliases seamlessly)
+      if (serviceFilter !== 'all') {
+        const normFilter = normalizeServiceType(serviceFilter);
+        const normService = normalizeServiceType(s.serviceType);
+        if (normFilter !== normService && s.serviceType !== serviceFilter) {
+          return false;
+        }
       }
 
       const ym = extractYearAndMonth(s.serviceDate);

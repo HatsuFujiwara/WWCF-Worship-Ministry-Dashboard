@@ -29,7 +29,8 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
   onReorder,
   selectedItemsMap,
   selectedMap,
-  onToggleItem
+  onToggleItem,
+  onUpdateItem
 }) => {
   const activeSelectedMap = selectedItemsMap || selectedMap || {};
 
@@ -79,6 +80,56 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
   const [dropTargetCategory, setDropTargetCategory] = useState<'praise' | 'worship' | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+
+  // Inline Title/Artist Editing & Swapping State
+  const [editingVideoId, setEditingVideoId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editArtist, setEditArtist] = useState('');
+
+  const handleUpdateItem = (updatedItem: PlaylistItem) => {
+    if (onUpdateItem) {
+      onUpdateItem(updatedItem);
+    }
+    const updatedList = normalizedItems.map((i) =>
+      i.videoId === updatedItem.videoId ? updatedItem : i
+    );
+    onReorder(updatedList);
+  };
+
+  const handleStartEdit = (item: PlaylistItem) => {
+    setEditingVideoId(item.videoId);
+    setEditTitle(item.title);
+    setEditArtist(item.artist || '');
+  };
+
+  const handleSaveEdit = (item: PlaylistItem) => {
+    const updated: PlaylistItem = {
+      ...item,
+      title: editTitle.trim() || item.title,
+      artist: editArtist.trim() || 'Unknown Artist'
+    };
+    handleUpdateItem(updated);
+    setEditingVideoId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingVideoId(null);
+  };
+
+  const handleSwapItem = (item: PlaylistItem) => {
+    const newTitle = item.artist && item.artist !== 'Unknown Artist' ? item.artist : (item.title || '');
+    const newArtist = item.title || 'Unknown Artist';
+    const updated: PlaylistItem = {
+      ...item,
+      title: newTitle,
+      artist: newArtist
+    };
+    handleUpdateItem(updated);
+    if (editingVideoId === item.videoId) {
+      setEditTitle(newTitle);
+      setEditArtist(newArtist);
+    }
+  };
 
   // References to section containers for drop calculation
   const containerRef = useRef<HTMLDivElement>(null);
@@ -462,16 +513,88 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
             )}
           </div>
 
-          {/* Details */}
+          {/* Details & Inline Edit */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate max-w-[220px] sm:max-w-[340px]">
-                {item.title}
-              </span>
-            </div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
-              {item.artist || 'Unknown Artist'} {item.album ? `• ${item.album}` : ''}
-            </p>
+            {editingVideoId === item.videoId ? (
+              <div className="space-y-1 py-0.5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Song Title"
+                    className="flex-1 px-2 py-0.5 text-xs font-bold rounded border border-slate-300 dark:border-white/20 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-[#1b75bc]"
+                    autoFocus
+                  />
+                  <SwapTitleArtistButton
+                    size="sm"
+                    className="min-w-[28px] min-h-[28px] w-7 h-7 p-0"
+                    onSwap={() => {
+                      const prev = editTitle;
+                      setEditTitle(editArtist);
+                      setEditArtist(prev);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveEdit(item)}
+                    className="px-2 py-0.5 text-[11px] font-bold rounded bg-[#1b75bc] text-white hover:bg-[#155d96] cursor-pointer"
+                    title="Save changes"
+                  >
+                    Done
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="px-1.5 py-0.5 text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                    title="Cancel"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={editArtist}
+                  onChange={(e) => setEditArtist(e.target.value)}
+                  placeholder="Artist"
+                  className="w-full px-2 py-0.5 text-[11px] rounded border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-[#1b75bc]"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate max-w-[200px] sm:max-w-[320px]">
+                      {item.title}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                    {item.artist || 'Unknown Artist'} {item.album ? `• ${item.album}` : ''}
+                  </p>
+                </div>
+
+                {/* Edit & Swap Controls */}
+                <div className="flex items-center gap-0.5 shrink-0 opacity-80 sm:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <SwapTitleArtistButton
+                    size="sm"
+                    className="min-w-[28px] min-h-[28px] w-7 h-7 p-0"
+                    onSwap={() => handleSwapItem(item)}
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStartEdit(item);
+                    }}
+                    title="Edit Title & Artist"
+                    aria-label={`Edit ${item.title}`}
+                    className="p-1 text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] rounded cursor-pointer"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Category Badge - Click or tap to toggle between Praise and Worship */}

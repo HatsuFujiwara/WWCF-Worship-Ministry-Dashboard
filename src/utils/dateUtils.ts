@@ -6,6 +6,54 @@
 export const MANILA_TIMEZONE = 'Asia/Manila';
 
 /**
+ * Checks whether a year is a leap year according to the Gregorian calendar.
+ */
+export function isLeapYear(year: number): boolean {
+  if (isNaN(year)) return false;
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+}
+
+/**
+ * Returns the exact number of days in a given calendar month (1-12) and year.
+ */
+export function getDaysInMonth(year: number, month: number): number {
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return 0;
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  if ([4, 6, 9, 11].includes(month)) {
+    return 30;
+  }
+  return 31;
+}
+
+/**
+ * Validates that year, month (1-12), and day form a legitimate calendar date.
+ * Rejects impossible dates like Feb 30/31, April 31, or non-leap Feb 29.
+ */
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+  if (year < 1900 || year > 2150) return false;
+  if (month < 1 || month > 12) return false;
+  const maxDays = getDaysInMonth(year, month);
+  return day >= 1 && day <= maxDays;
+}
+
+/**
+ * Validates a date string strictly in YYYY-MM-DD format with real calendar validity.
+ */
+export function isValidDateString(dateStr?: string): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const trimmed = dateStr.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false;
+  const parts = trimmed.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  return isValidCalendarDate(y, m, d);
+}
+
+/**
  * Returns today's date in Asia/Manila timezone as "YYYY-MM-DD"
  */
 export function getManilaTodayString(): string {
@@ -187,10 +235,10 @@ export function isValidServiceDateForType(
   serviceType: string,
   dateStr: string
 ): ServiceDateValidationResult {
-  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+  if (!dateStr || !isValidDateString(dateStr.trim())) {
     return {
       isValid: false,
-      errorMessage: 'Please enter a valid date in YYYY-MM-DD format.'
+      errorMessage: 'Please enter a valid calendar date in YYYY-MM-DD format (verify month length and leap years).'
     };
   }
 

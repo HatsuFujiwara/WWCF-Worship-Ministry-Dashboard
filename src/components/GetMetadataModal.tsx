@@ -5,8 +5,9 @@ import {
   fetchMultiSourceMetadata,
   ComprehensiveMetadata
 } from '../services/musicMetadataService';
-import { SongLanguage, sanitizeSongLanguage } from '../utils/languageUtils';
 import { Modal } from './Modal';
+import { SwapTitleArtistButton } from './SwapTitleArtistButton';
+import { sanitizeSongLanguage } from '../utils/languageUtils';
 import {
   Music,
   Sparkles,
@@ -420,6 +421,25 @@ export const GetMetadataModal: React.FC<GetMetadataModalProps> = ({
             </div>
 
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+              {retrievedMeta && (
+                <div className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60 mb-2">
+                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    Swap Detected Title & Artist
+                  </span>
+                  <SwapTitleArtistButton
+                    size="sm"
+                    onSwap={() => {
+                      setRetrievedMeta({
+                        ...retrievedMeta,
+                        title: retrievedMeta.artist || '',
+                        artist: retrievedMeta.title || ''
+                      });
+                    }}
+                    disabled={!retrievedMeta.title && !retrievedMeta.artist}
+                  />
+                </div>
+              )}
+
               {/* 1. Title */}
               <ComparisonRow
                 id="field-title"

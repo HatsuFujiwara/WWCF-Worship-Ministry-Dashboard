@@ -1,10 +1,37 @@
-import { getManilaTodayString, addDaysToDateString } from './utils/dateUtils';
+import { getManilaTodayString, addDaysToDateString, getDaysInMonth } from './utils/dateUtils';
 
-export type ServiceType = 
+export type CanonicalServiceType =
   | 'Sunday Service'
   | 'Midweek Prayer Service'
+  | 'Youth Fellowship'
+  | 'Worship Event';
+
+export type LegacyServiceType =
   | 'Youth Service'
   | 'Special Worship Event';
+
+export type ServiceType = CanonicalServiceType | LegacyServiceType | string;
+
+export const CANONICAL_SERVICE_TYPES: CanonicalServiceType[] = [
+  'Sunday Service',
+  'Midweek Prayer Service',
+  'Youth Fellowship',
+  'Worship Event'
+];
+
+/**
+ * Normalizes any legacy or alias service type to the canonical intended name,
+ * while safely preserving valid custom service names.
+ */
+export function normalizeServiceType(type?: string): string {
+  if (!type) return 'Sunday Service';
+  const trimmed = type.trim();
+  if (trimmed === 'Youth Service' || trimmed === 'Youth Fellowship') return 'Youth Fellowship';
+  if (trimmed === 'Special Worship Event' || trimmed === 'Worship Event') return 'Worship Event';
+  if (trimmed === 'Midweek Prayer Service') return 'Midweek Prayer Service';
+  if (trimmed === 'Sunday Service') return 'Sunday Service';
+  return trimmed;
+}
 
 export type DisciplinaryDurationType = 'days' | 'weeks' | 'months' | 'years';
 
@@ -47,13 +74,15 @@ export function calculateDisciplinaryEndDate(
   let day = parseInt(parts[2], 10);
 
   if (type === 'months') {
-    month += value;
-    while (month > 12) {
-      month -= 12;
-      year += 1;
-    }
+    const totalMonths = year * 12 + (month - 1) + value;
+    year = Math.floor(totalMonths / 12);
+    month = (totalMonths % 12) + 1;
+    const maxDays = getDaysInMonth(year, month);
+    day = Math.min(day, maxDays);
   } else if (type === 'years') {
     year += value;
+    const maxDays = getDaysInMonth(year, month);
+    day = Math.min(day, maxDays);
   }
 
   const mStr = String(month).padStart(2, '0');
@@ -136,7 +165,7 @@ export interface Schedule {
   updatedAt: string;
 }
 
-export type ActiveTab = 'dashboard' | 'scheduler' | 'schedules' | 'members' | 'songs';
+export type ActiveTab = 'dashboard' | 'scheduler' | 'schedules' | 'members' | 'songs' | 'analytics';
 
 export type SongCategory = 'praise' | 'worship' | 'both';
 

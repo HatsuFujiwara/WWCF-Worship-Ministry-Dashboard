@@ -5,6 +5,7 @@ import {
   Schedule,
   ToastMessage,
   Song,
+  SongFamily,
   AccessibilitySettings,
   AppLayoutPreferences,
   NavigationOrientation,
@@ -13,35 +14,43 @@ import {
 } from './types';
 import { StorageService } from './services/storage';
 import { SongService } from './services/songService';
+import { SongFamilyService } from './services/songFamilyService';
 import { LineupHistoryService } from './services/lineupHistoryService';
+import { GoogleAuthService, RemoteConflictPayload } from './services/googleAuthService';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { DashboardView } from './components/DashboardView';
-import { SchedulerView } from './components/SchedulerView';
-import { SongsView } from './components/SongsView';
-import { SchedulesView } from './components/SchedulesView';
-import { MemberEditorView } from './components/MemberEditorView';
 import { ToastContainer } from './components/ToastContainer';
 import { Modal } from './components/Modal';
-import { BackupRestoreModal } from './components/BackupRestoreModal';
-import { OnboardingModal } from './components/OnboardingModal';
-import { SettingsModal } from './components/SettingsModal';
-import { HelpMenuModal } from './components/HelpMenuModal';
-import { InteractiveTourOverlay } from './components/InteractiveTourOverlay';
-import { WelcomeGuideModal } from './components/WelcomeGuideModal';
-import { AccessibilityOnboardingModal } from './components/AccessibilityOnboardingModal';
 import { TextToSpeechNavigator } from './components/TextToSpeechNavigator';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { NewLineupModal } from './components/NewLineupModal';
-import { TransferDataModal } from './components/TransferDataModal';
-import { DeleteAllDataModal } from './components/DeleteAllDataModal';
-import { speechAssistant } from './utils/speechAssistant';
-import { exportLineupAsPDF, exportLineupAsPNG } from './services/exportService';
+
+// Lazy-loaded Views for code splitting
+const SchedulerView = React.lazy(() => import('./components/SchedulerView').then((m) => ({ default: m.SchedulerView })));
+const SongsView = React.lazy(() => import('./components/SongsView').then((m) => ({ default: m.SongsView })));
+const SchedulesView = React.lazy(() => import('./components/SchedulesView').then((m) => ({ default: m.SchedulesView })));
+const MemberEditorView = React.lazy(() => import('./components/MemberEditorView').then((m) => ({ default: m.MemberEditorView })));
+const SongAnalyticsView = React.lazy(() => import('./components/SongAnalyticsView').then((m) => ({ default: m.SongAnalyticsView })));
+
+// Lazy-loaded Modals
+const BackupRestoreModal = React.lazy(() => import('./components/BackupRestoreModal').then((m) => ({ default: m.BackupRestoreModal })));
+const SettingsModal = React.lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
+const HelpMenuModal = React.lazy(() => import('./components/HelpMenuModal').then((m) => ({ default: m.HelpMenuModal })));
+const InteractiveTourOverlay = React.lazy(() => import('./components/InteractiveTourOverlay').then((m) => ({ default: m.InteractiveTourOverlay })));
+const WelcomeGuideModal = React.lazy(() => import('./components/WelcomeGuideModal').then((m) => ({ default: m.WelcomeGuideModal })));
+const AccessibilityOnboardingModal = React.lazy(() => import('./components/AccessibilityOnboardingModal').then((m) => ({ default: m.AccessibilityOnboardingModal })));
+const GoogleConnectOfferModal = React.lazy(() => import('./components/GoogleConnectOfferModal').then((m) => ({ default: m.GoogleConnectOfferModal })));
+const DriveConflictModal = React.lazy(() => import('./components/DriveConflictModal').then((m) => ({ default: m.DriveConflictModal })));
+const TransferDataModal = React.lazy(() => import('./components/TransferDataModal').then((m) => ({ default: m.TransferDataModal })));
+const DeleteAllDataModal = React.lazy(() => import('./components/DeleteAllDataModal').then((m) => ({ default: m.DeleteAllDataModal })));
+const NewLineupModal = React.lazy(() => import('./components/NewLineupModal').then((m) => ({ default: m.NewLineupModal })));
 import { sortTags } from './utils/tagUtils';
 import { getManilaNowISO, getManilaTodayString } from './utils/dateUtils';
 import { getNextAvailableServiceDate, getSmartInitialServiceDetails, ensureMonthlyPlaceholders, isScheduleEmpty } from './utils/scheduleUtils';
 import { validateUniqueMemberRoles } from './utils/memberUtils';
+import { soundEffects } from './utils/audioFeedback';
+import { speechAssistant } from './utils/speechAssistant';
 
 export default function App() {
   // Navigation & UI state
@@ -103,14 +112,17 @@ export default function App() {
     return withPlaceholders;
   });
   const [songs, setSongs] = useState<Song[]>([]);
+  const [songFamilies, setSongFamilies] = useState<SongFamily[]>([]);
 
-  // Refresh songs from SongService
+  // Refresh songs & song families from services
   const loadSongs = async () => {
     try {
       const fetched = await SongService.getSongs();
       setSongs(fetched);
+      const fams = await SongFamilyService.getSongFamilies();
+      setSongFamilies(fams || []);
     } catch (e) {
-      console.error('Failed to load songs:', e);
+      console.error('Failed to load songs or families:', e);
     }
   };
 
@@ -135,14 +147,36 @@ export default function App() {
     };
   }, []);
 
-  // Listen for songs updated event from anywhere in the app
+  // Listen for storage and domain updated events from anywhere in the app
   useEffect(() => {
     const handleSongsUpdated = () => {
       loadSongs();
     };
+    const handleSchedulesUpdated = () => {
+      setSchedules(StorageService.getSchedules());
+    };
+    const handleMembersUpdated = () => {
+      setMembers(StorageService.getMembers());
+    };
+    const handleLabelsUpdated = () => {
+      setLabels(StorageService.getLabels());
+    };
+    const handleFamiliesUpdated = () => {
+      SongFamilyService.getSongFamilies().then((fams) => setSongFamilies(fams || []));
+    };
+
     window.addEventListener('wwcf:songs-updated', handleSongsUpdated);
+    window.addEventListener('wwcf:schedules-updated', handleSchedulesUpdated);
+    window.addEventListener('wwcf:members-updated', handleMembersUpdated);
+    window.addEventListener('wwcf:labels-updated', handleLabelsUpdated);
+    window.addEventListener('wwcf:families-updated', handleFamiliesUpdated);
+
     return () => {
       window.removeEventListener('wwcf:songs-updated', handleSongsUpdated);
+      window.removeEventListener('wwcf:schedules-updated', handleSchedulesUpdated);
+      window.removeEventListener('wwcf:members-updated', handleMembersUpdated);
+      window.removeEventListener('wwcf:labels-updated', handleLabelsUpdated);
+      window.removeEventListener('wwcf:families-updated', handleFamiliesUpdated);
     };
   }, []);
 
@@ -225,6 +259,68 @@ export default function App() {
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [guideInitialStep, setGuideInitialStep] = useState(1);
 
+  // Google Account & Cloud Save Modals
+  const [isGoogleOfferOpen, setIsGoogleOfferOpen] = useState(false);
+  const [driveConflict, setDriveConflict] = useState<RemoteConflictPayload | null>(null);
+
+  useEffect(() => {
+    const unsubConflict = GoogleAuthService.onConflict((conflict) => {
+      setDriveConflict(conflict);
+    });
+    const unsubCandidates = GoogleAuthService.onMultipleCandidates(async (candidates) => {
+      if (!candidates || candidates.length === 0) return;
+      const primary = candidates[0];
+      const token = GoogleAuthService.getAccessToken();
+      let remoteContent: any = null;
+      if (token) {
+        try {
+          remoteContent = await GoogleAuthService.readDriveBackupContent(token, primary.id);
+        } catch (e) {
+          console.warn('Failed to pre-read candidate backup:', e);
+        }
+      }
+      setDriveConflict({
+        fileId: primary.id,
+        remoteModifiedTime: primary.modifiedTime,
+        candidateFiles: candidates,
+        remoteData: remoteContent || {
+          app: 'WWCF Santa Cruz Worship Ministry',
+          version: '1.0',
+          data: {}
+        }
+      });
+    });
+
+    const handleDataChanged = () => {
+      GoogleAuthService.triggerDebouncedAutoSync();
+    };
+    window.addEventListener('wwcf:data-changed', handleDataChanged);
+
+    return () => {
+      unsubConflict();
+      unsubCandidates();
+      window.removeEventListener('wwcf:data-changed', handleDataChanged);
+    };
+  }, []);
+
+  const checkAndShowGoogleOffer = useCallback(() => {
+    try {
+      // Do not prompt connect offer if app owner hasn't configured a Google Client ID
+      if (!GoogleAuthService.getClientId()) {
+        return;
+      }
+      const seen = localStorage.getItem('wwcf_google_offer_seen_v1');
+      if (!seen && !GoogleAuthService.isConnected()) {
+        setIsGoogleOfferOpen(true);
+      }
+    } catch {}
+  }, []);
+
+  // Trigger debounced cloud auto-sync when persisted local records change (NOT on transient editingSchedule state)
+  useEffect(() => {
+    GoogleAuthService.triggerDebouncedAutoSync();
+  }, [schedules, members, songs, labels, songFamilies]);
+
   useEffect(() => {
     const mode = StorageService.getGuideMode();
     const skippedSession = StorageService.getOnboardingSkippedSession();
@@ -259,6 +355,8 @@ export default function App() {
     const skippedSession = StorageService.getOnboardingSkippedSession();
     if (!skippedSession && mode !== 'never') {
       setIsWelcomeModalOpen(true);
+    } else {
+      checkAndShowGoogleOffer();
     }
   };
 
@@ -317,6 +415,14 @@ export default function App() {
   }, [accessibilitySettings.visualToastAlerts]);
 
   const showToast = (text: string, type: 'success' | 'danger' | 'info' = 'info') => {
+    if (type === 'success') {
+      soundEffects.playSuccess();
+    } else if (type === 'danger') {
+      soundEffects.playWarning();
+    } else {
+      soundEffects.playTap();
+    }
+
     if (accessibilitySettings.visualToastAlerts === false) {
       return;
     }
@@ -602,6 +708,7 @@ export default function App() {
       return;
     }
     try {
+      const { exportLineupAsPDF } = await import('./services/exportService');
       await exportLineupAsPDF(schedule);
       showToast('Worship schedule exported as PDF!', 'success');
     } catch (err) {
@@ -617,6 +724,7 @@ export default function App() {
       return;
     }
     try {
+      const { exportLineupAsPNG } = await import('./services/exportService');
       await exportLineupAsPNG(schedule);
       showToast('Worship schedule exported as PNG image!', 'success');
     } catch (err) {
@@ -866,196 +974,239 @@ export default function App() {
             onReset={() => setActiveTab('dashboard')}
           >
             <div className="page-transition">
-              {activeTab === 'dashboard' && (
-                <DashboardView
-                  members={members}
-                  schedules={schedules}
-                  allSongs={songs}
-                  setActiveTab={setActiveTab}
-                  onEditSchedule={handleEditScheduleFromList}
-                  onUpdateSchedules={handleUpdateSchedules}
-                />
-              )}
+              <React.Suspense
+                fallback={
+                  <div className="flex items-center justify-center p-12 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Loading view...
+                  </div>
+                }
+              >
+                {activeTab === 'dashboard' && (
+                  <DashboardView
+                    members={members}
+                    schedules={schedules}
+                    allSongs={songs}
+                    setActiveTab={setActiveTab}
+                    onEditSchedule={handleEditScheduleFromList}
+                    onUpdateSchedules={handleUpdateSchedules}
+                  />
+                )}
 
-              {activeTab === 'scheduler' && (
-                <SchedulerView
-                  members={members}
-                  allSongs={songs}
-                  schedules={schedules}
-                  editingSchedule={editingSchedule}
-                  onSaveSchedule={handleSaveSchedule}
-                  onExportPDF={handleExportPDF}
-                  onExportPNG={handleExportPNG}
-                  onResetForm={handleResetSchedulerForm}
-                  onTriggerDraft={handleTriggerDraft}
-                  onRefreshSongs={loadSongs}
-                  showToast={showToast}
-                  onSelectSchedule={handleEditScheduleFromList}
-                  onViewSchedules={() => setActiveTab('schedules')}
-                />
-              )}
+                {activeTab === 'scheduler' && (
+                  <SchedulerView
+                    members={members}
+                    allSongs={songs}
+                    schedules={schedules}
+                    editingSchedule={editingSchedule}
+                    onSaveSchedule={handleSaveSchedule}
+                    onExportPDF={handleExportPDF}
+                    onExportPNG={handleExportPNG}
+                    onResetForm={handleResetSchedulerForm}
+                    onTriggerDraft={handleTriggerDraft}
+                    onRefreshSongs={loadSongs}
+                    showToast={showToast}
+                    onSelectSchedule={handleEditScheduleFromList}
+                    onViewSchedules={() => setActiveTab('schedules')}
+                  />
+                )}
 
-              {activeTab === 'songs' && (
-                <SongsView
-                  songs={songs}
-                  schedules={schedules}
-                  onRefreshSongs={loadSongs}
-                  onUpdateSchedules={handleUpdateSchedules}
-                  showToast={showToast}
-                />
-              )}
+                {activeTab === 'songs' && (
+                  <SongsView
+                    songs={songs}
+                    schedules={schedules}
+                    onRefreshSongs={loadSongs}
+                    onUpdateSchedules={handleUpdateSchedules}
+                    showToast={showToast}
+                  />
+                )}
 
-              {activeTab === 'schedules' && (
-                <SchedulesView
-                  schedules={schedules}
-                  allSongs={songs}
-                  onEditSchedule={handleEditScheduleFromList}
-                  onDuplicateSchedule={handleDuplicateSchedule}
-                  onDeleteSchedule={handleDeleteSchedule}
-                  onBulkDeleteSchedules={handleBulkDeleteSchedules}
-                  onExportPDF={handleExportPDF}
-                  onExportPNG={handleExportPNG}
-                  onUpdateSchedules={handleUpdateSchedules}
-                />
-              )}
+                {activeTab === 'schedules' && (
+                  <SchedulesView
+                    schedules={schedules}
+                    allSongs={songs}
+                    onEditSchedule={handleEditScheduleFromList}
+                    onDuplicateSchedule={handleDuplicateSchedule}
+                    onDeleteSchedule={handleDeleteSchedule}
+                    onBulkDeleteSchedules={handleBulkDeleteSchedules}
+                    onExportPDF={handleExportPDF}
+                    onExportPNG={handleExportPNG}
+                    onUpdateSchedules={handleUpdateSchedules}
+                  />
+                )}
 
-              {activeTab === 'members' && (
-                <MemberEditorView
-                  members={members}
-                  labels={labels}
-                  schedules={schedules}
-                  onAddMember={handleAddMember}
-                  onDeleteMember={handleDeleteMember}
-                  onSaveMembers={handleSaveMembers}
-                  onUpdateSchedules={handleUpdateSchedules}
-                  onAddCustomLabel={handleAddCustomLabel}
-                  showToast={showToast}
-                />
-              )}
+                {activeTab === 'analytics' && (
+                  <SongAnalyticsView
+                    schedules={schedules}
+                    songs={songs}
+                    members={members}
+                    songFamilies={songFamilies}
+                    showToast={showToast}
+                  />
+                )}
+
+                {activeTab === 'members' && (
+                  <MemberEditorView
+                    members={members}
+                    labels={labels}
+                    schedules={schedules}
+                    onAddMember={handleAddMember}
+                    onDeleteMember={handleDeleteMember}
+                    onSaveMembers={handleSaveMembers}
+                    onUpdateSchedules={handleUpdateSchedules}
+                    onAddCustomLabel={handleAddCustomLabel}
+                    showToast={showToast}
+                  />
+                )}
+              </React.Suspense>
             </div>
           </ErrorBoundary>
         </main>
       </div>
 
-      {/* Backup & Restore Modal */}
-      <BackupRestoreModal
-        isOpen={isBackupModalOpen}
-        onClose={() => setIsBackupModalOpen(false)}
-        members={members}
-        songs={songs}
-        schedules={schedules}
-        labels={labels}
-        onDataRestored={handleReloadAllData}
-        showToast={showToast}
-      />
+      {/* Lazy-loaded Modals wrapped in Suspense */}
+      <React.Suspense fallback={null}>
+        {/* Backup & Restore Modal */}
+        <BackupRestoreModal
+          isOpen={isBackupModalOpen}
+          onClose={() => setIsBackupModalOpen(false)}
+          members={members}
+          songs={songs}
+          schedules={schedules}
+          labels={labels}
+          onDataRestored={handleReloadAllData}
+          showToast={showToast}
+        />
 
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        isDarkMode={isDarkMode}
-        setIsDarkMode={setIsDarkMode}
-        accessibilitySettings={accessibilitySettings}
-        onUpdateAccessibility={setAccessibilitySettings}
-        onOpenOnboarding={() => {
-          setGuideInitialStep(1);
-          setIsOnboardingOpen(true);
-        }}
-        onOpenBackupRestore={() => setIsBackupModalOpen(true)}
-        onOpenTransferData={() => setIsTransferModalOpen(true)}
-        onOpenDeleteAllData={() => setIsDeleteAllDataOpen(true)}
-        showToast={showToast}
-      />
+        {/* Settings Modal */}
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          isDarkMode={isDarkMode}
+          setIsDarkMode={setIsDarkMode}
+          accessibilitySettings={accessibilitySettings}
+          onUpdateAccessibility={setAccessibilitySettings}
+          onOpenOnboarding={() => {
+            setGuideInitialStep(1);
+            setIsOnboardingOpen(true);
+          }}
+          onOpenBackupRestore={() => setIsBackupModalOpen(true)}
+          onOpenTransferData={() => setIsTransferModalOpen(true)}
+          onOpenDeleteAllData={() => setIsDeleteAllDataOpen(true)}
+          showToast={showToast}
+        />
 
-      {/* Delete All Data / Fresh Start Modal */}
-      <DeleteAllDataModal
-        isOpen={isDeleteAllDataOpen}
-        onClose={() => setIsDeleteAllDataOpen(false)}
-        onDataDeleted={handleFreshStartReset}
-        showToast={showToast}
-      />
+        {/* Delete All Data / Fresh Start Modal */}
+        <DeleteAllDataModal
+          isOpen={isDeleteAllDataOpen}
+          onClose={() => setIsDeleteAllDataOpen(false)}
+          onDataDeleted={handleFreshStartReset}
+          showToast={showToast}
+        />
 
-      {/* Transfer Data Modal (PC to Phone Data Transfer) */}
-      <TransferDataModal
-        isOpen={isTransferModalOpen}
-        onClose={() => {
-          setIsTransferModalOpen(false);
-          setInitialTransferParams(null);
-        }}
-        members={members}
-        songs={songs}
-        schedules={schedules}
-        labels={labels}
-        draftSchedule={StorageService.getDraftSchedule()}
-        onDataTransferred={() => {
-          setMembers(StorageService.getMembersSync());
-          setLabels(StorageService.getLabelsSync());
-          setSchedules(StorageService.getSchedulesSync());
-          loadSongs();
-        }}
-        showToast={showToast}
-        initialSessionParams={initialTransferParams}
-      />
+        {/* Transfer Data Modal (PC to Phone Data Transfer) */}
+        <TransferDataModal
+          isOpen={isTransferModalOpen}
+          onClose={() => {
+            setIsTransferModalOpen(false);
+            setInitialTransferParams(null);
+          }}
+          members={members}
+          songs={songs}
+          schedules={schedules}
+          labels={labels}
+          draftSchedule={StorageService.getDraftSchedule()}
+          onDataTransferred={() => {
+            setMembers(StorageService.getMembersSync());
+            setLabels(StorageService.getLabelsSync());
+            setSchedules(StorageService.getSchedulesSync());
+            loadSongs();
+          }}
+          showToast={showToast}
+          initialSessionParams={initialTransferParams}
+        />
 
-      {/* Step 1: Accessibility Onboarding Preferences Modal */}
-      <AccessibilityOnboardingModal
-        isOpen={isAccessibilityWelcomeOpen}
-        onComplete={handleAccessibilityOnboardingComplete}
-        onUpdateAccessibility={setAccessibilitySettings}
-      />
+        {/* Step 1: Accessibility Onboarding Preferences Modal */}
+        <AccessibilityOnboardingModal
+          isOpen={isAccessibilityWelcomeOpen}
+          onComplete={handleAccessibilityOnboardingComplete}
+          onUpdateAccessibility={setAccessibilitySettings}
+        />
 
-      {/* Step 2: Welcome Guide Greeting Modal */}
-      <WelcomeGuideModal
-        isOpen={isWelcomeModalOpen}
-        onClose={() => setIsWelcomeModalOpen(false)}
-        onStartGuide={() => {
-          setGuideInitialStep(1);
-          setIsOnboardingOpen(true);
-        }}
-        showToast={showToast}
-      />
+        {/* Step 2: Welcome Guide Greeting Modal */}
+        <WelcomeGuideModal
+          isOpen={isWelcomeModalOpen}
+          onClose={() => {
+            setIsWelcomeModalOpen(false);
+            checkAndShowGoogleOffer();
+          }}
+          onStartGuide={() => {
+            setGuideInitialStep(1);
+            setIsOnboardingOpen(true);
+          }}
+          showToast={showToast}
+        />
 
-      {/* Help Menu Modal */}
-      <HelpMenuModal
-        isOpen={isHelpMenuOpen}
-        onClose={() => setIsHelpMenuOpen(false)}
-        onSelectSection={(stepId) => {
-          setGuideInitialStep(stepId);
-          setIsOnboardingOpen(true);
-        }}
-      />
+        {/* Help Menu Modal */}
+        <HelpMenuModal
+          isOpen={isHelpMenuOpen}
+          onClose={() => setIsHelpMenuOpen(false)}
+          onSelectSection={(stepId) => {
+            setGuideInitialStep(stepId);
+            setIsOnboardingOpen(true);
+          }}
+        />
 
-      {/* Interactive Guided Tour Overlay */}
-      <InteractiveTourOverlay
-        isOpen={isOnboardingOpen}
-        onClose={() => setIsOnboardingOpen(false)}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        initialStep={guideInitialStep}
-      />
+        {/* Interactive Guided Tour Overlay */}
+        <InteractiveTourOverlay
+          isOpen={isOnboardingOpen}
+          onClose={() => {
+            setIsOnboardingOpen(false);
+            checkAndShowGoogleOffer();
+          }}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          initialStep={guideInitialStep}
+        />
 
-      {/* Confirmation Modal */}
-      <Modal
-        id="app-confirmation-modal"
-        isOpen={modalConfig.isOpen}
-        title={modalConfig.title}
-        message={modalConfig.message}
-        confirmLabel={modalConfig.confirmLabel}
-        cancelLabel={modalConfig.cancelLabel}
-        isDanger={modalConfig.isDanger}
-        onConfirm={modalConfig.onConfirm}
-        onClose={() => setModalConfig((prev) => ({ ...prev, isOpen: false }))}
-      />
+        {/* Google Account & Cloud Save Offer Modal (First run, post-accessibility) */}
+        <GoogleConnectOfferModal
+          isOpen={isGoogleOfferOpen}
+          onClose={() => setIsGoogleOfferOpen(false)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          showToast={showToast}
+        />
 
-      {/* New Lineup Selection Modal */}
-      <NewLineupModal
-        isOpen={isNewLineupModalOpen}
-        onClose={() => setIsNewLineupModalOpen(false)}
-        schedules={schedules}
-        onLoadExistingLineup={handleLoadExistingLineup}
-        onCreateNewLineup={handleCreateNewLineup}
-        showToast={showToast}
-      />
+        {/* Google Drive Conflict Resolution Modal */}
+        <DriveConflictModal
+          conflict={driveConflict}
+          onClose={() => setDriveConflict(null)}
+          onResolved={handleReloadAllData}
+          showToast={showToast}
+        />
+
+        {/* New Lineup Selection Modal */}
+        <NewLineupModal
+          isOpen={isNewLineupModalOpen}
+          onClose={() => setIsNewLineupModalOpen(false)}
+          schedules={schedules}
+          onLoadExistingLineup={handleLoadExistingLineup}
+          onCreateNewLineup={handleCreateNewLineup}
+          showToast={showToast}
+        />
+
+        {/* Confirmation Modal */}
+        <Modal
+          id="app-confirmation-modal"
+          isOpen={modalConfig.isOpen}
+          title={modalConfig.title}
+          message={modalConfig.message}
+          confirmLabel={modalConfig.confirmLabel}
+          cancelLabel={modalConfig.cancelLabel}
+          isDanger={modalConfig.isDanger}
+          onConfirm={modalConfig.onConfirm}
+          onClose={() => setModalConfig((prev) => ({ ...prev, isOpen: false }))}
+        />
+      </React.Suspense>
 
       {/* Floating Text-to-Speech Navigator (Optional control panel) */}
       <TextToSpeechNavigator

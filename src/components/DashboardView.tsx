@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Member, Schedule, ActiveTab, formatAssignmentMemberNames, ServiceType, Song } from '../types';
+import { Member, Schedule, ActiveTab, formatAssignmentMemberNames, ServiceType, Song, normalizeServiceType } from '../types';
 import {
   formatDateDisplayManila,
   getManilaTodayString,
@@ -120,17 +120,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
   }, [currentMonthSchedules]);
 
-  // Other service types (e.g. Youth Service, Special Worship Event)
+  // Other service types (e.g. Youth Fellowship, Worship Event)
   const otherServiceTypes = useMemo(() => {
     const set = new Set<ServiceType>();
     currentMonthSchedules.forEach((s) => {
-      if (s.serviceType !== 'Sunday Service' && s.serviceType !== 'Midweek Prayer Service') {
-        set.add(s.serviceType);
+      const norm = normalizeServiceType(s.serviceType);
+      if (norm !== 'Sunday Service' && norm !== 'Midweek Prayer Service') {
+        set.add(norm);
       }
     });
-    // If Youth Service has ever been scheduled in this ministry, ensure its section is available
-    if (schedules.some((s) => s.serviceType === 'Youth Service')) {
-      set.add('Youth Service');
+    // If Youth Fellowship or legacy Youth Service has ever been scheduled, ensure its section is available
+    if (schedules.some((s) => normalizeServiceType(s.serviceType) === 'Youth Fellowship')) {
+      set.add('Youth Fellowship');
     }
     return Array.from(set);
   }, [currentMonthSchedules, schedules]);

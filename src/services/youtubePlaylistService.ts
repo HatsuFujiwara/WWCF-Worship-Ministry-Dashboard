@@ -27,6 +27,7 @@ export interface YouTubePlaylistPreview {
   totalSongs: number;
   skippedUnavailable: number;
   estimatedTotalDuration: string; // e.g. "22 mins" or "1 hr 15 mins"
+  isComplete?: boolean;
 }
 
 export interface ImportSummary {
@@ -109,7 +110,7 @@ export function extractPlaylistId(urlStr: string): string | null {
  * Formats seconds to "MM:SS" or "H:MM:SS"
  */
 export function formatDuration(seconds: number): string {
-  if (!seconds || isNaN(seconds) || seconds <= 0) return '3:45';
+  if (!seconds || isNaN(seconds) || seconds <= 0) return '';
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
@@ -124,9 +125,9 @@ export function formatDuration(seconds: number): string {
  * Parses ISO 8601 duration string (e.g., "PT4M15S" or "PT1H2M3S") into "MM:SS" or "H:MM:SS"
  */
 export function parseISO8601Duration(isoDuration?: string): string {
-  if (!isoDuration) return '3:45';
+  if (!isoDuration) return '';
   const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return '3:45';
+  if (!match) return '';
   const hours = parseInt(match[1] || '0', 10);
   const minutes = parseInt(match[2] || '0', 10);
   const seconds = parseInt(match[3] || '0', 10);
@@ -202,65 +203,111 @@ export function parseYouTubeTitle(rawTitle: string, channelName?: string): { tit
 }
 
 export class YouTubePlaylistService {
+  private static memoryApiKey: string = '';
+  private static readonly REMEMBER_KEY_STORAGE = 'wwcf_youtube_user_api_key_remembered';
+
   /**
-   * Resolve YouTube API key from client-accessible sources
+   * Resolve user YouTube API key from memory or remembered storage
    */
-  static getClientApiKey(customKey?: string): string {
-    if (customKey && customKey.trim()) {
-      return customKey.trim();
-    }
-    const envKey =
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_YOUTUBE_API_KEY) ||
-      (typeof process !== 'undefined' ? process.env?.VITE_YOUTUBE_API_KEY || process.env?.YOUTUBE_API_KEY : undefined);
-
-    if (
-      envKey &&
-      typeof envKey === 'string' &&
-      envKey.trim() &&
-      envKey !== 'MY_YOUTUBE_API_KEY' &&
-      envKey !== '""' &&
-      envKey !== "''"
-    ) {
-      return envKey.trim();
-    }
-
-    if (typeof localStorage !== 'undefined') {
-      const localKey = localStorage.getItem('YOUTUBE_API_KEY');
-      if (localKey && typeof localKey === 'string' && localKey.trim()) {
-        return localKey.trim();
+  static getStoredApiKey(): string {
+    if (this.memoryApiKey) return this.memoryApiKey;
+    try {
+      if (typeof window !== 'undefined') {
+        const remembered = localStorage.getItem(this.REMEMBER_KEY_STORAGE);
+        if (remembered && remembered.trim()) {
+          this.memoryApiKey = remembered.trim();
+          return this.memoryApiKey;
+        }
       }
-    }
-
+    } catch {}
     return '';
   }
 
   /**
-   * Checks if server has an official YouTube API key configured
+   * Set user YouTube API key (held in memory by default, opt-in local persistence)
    */
-  static async checkServerStatus(): Promise<{ configured: boolean; provider: string }> {
+  static setApiKey(key: string, rememberOnDevice: boolean = false): void {
+    const clean = (key || '').trim();
+    this.memoryApiKey = clean;
     try {
-      const res = await fetch('/api/youtube/status');
-      if (res.ok) {
-        const json = await res.json();
-        return {
-          configured: Boolean(json.configured),
-          provider: json.provider || 'youtube-data-api-v3'
-        };
+      if (typeof window !== 'undefined') {
+        if (rememberOnDevice && clean) {
+          localStorage.setItem(this.REMEMBER_KEY_STORAGE, clean);
+        } else {
+          localStorage.removeItem(this.REMEMBER_KEY_STORAGE);
+        }
       }
-    } catch {
-      // ignore network errors
-    }
-    return { configured: false, provider: 'youtube-data-api-v3' };
+    } catch {}
   }
 
   /**
-   * Fetches full playlist metadata and list of songs.
-   * Priority:
-   * 1. Express backend route /api/youtube/playlist (protects server keys, handles custom keys securely)
-   * 2. Direct browser official YouTube API (fallback if server route unreachable)
-   * 3. Fallback mirrors (only if no key configured anywhere and verified playable items returned)
+   * Clear user YouTube API key from memory and device
    */
-  static async fetchPlaylistPreview(urlOrId: string, customApiKey?: string): Promise<YouTubePlaylistPreview> {
+  static clearApiKey(): void {
+    this.memoryApiKey = '';
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(this.REMEMBER_KEY_STORAGE);
+      }
+    } catch {}
+  }
+
+  /**
+   * Whether a user YouTube API key is currently active
+   */
+  static isKeyConfigured(): boolean {
+    return Boolean(this.getStoredApiKey());
+  }
+
+  /**
+   * Whether the key is remembered in localStorage on this device
+   */
+  static isKeyRemembered(): boolean {
+    try {
+      if (typeof window !== 'undefined') {
+        return Boolean(localStorage.getItem(this.REMEMBER_KEY_STORAGE));
+      }
+    } catch {}
+    return false;
+  }
+
+  /**
+   * Validates standard Google API key format (typically AIzaSy... 39 characters)
+   */
+  static validateKeyFormat(key: string): boolean {
+    const trimmed = (key || '').trim();
+    return /^AIzaSy[a-zA-Z0-9_\-]{33}$/.test(trimmed);
+  }
+
+  /**
+   * Backwards compatible key resolver
+   */
+  static getClientApiKey(customKey?: string): string {
+    if (customKey && customKey.trim()) return customKey.trim();
+    return this.getStoredApiKey();
+  }
+
+  /**
+   * Checks client configuration status (replaces old server status check)
+   */
+  static async checkServerStatus(): Promise<{ configured: boolean; provider: string }> {
+    return {
+      configured: this.isKeyConfigured(),
+      provider: 'youtube-data-api-v3'
+    };
+  }
+
+  /**
+   * Fetches full playlist metadata and list of songs directly from Google YouTube Data API v3.
+   * Priority:
+   * 1. Google OAuth token (bearer token sent directly to Google, never to app server)
+   * 2. User-provided YouTube Data API v3 key (sent directly to Google, never to app server)
+   */
+  static async fetchPlaylistPreview(
+    urlOrId: string,
+    customApiKey?: string,
+    oauthToken?: string
+  ): Promise<YouTubePlaylistPreview> {
     const playlistId = extractPlaylistId(urlOrId);
     if (!playlistId) {
       throw new YouTubeApiException(
@@ -271,58 +318,24 @@ export class YouTubePlaylistService {
 
     const cleanPlaylistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
 
-    // 1. Try server-side proxy route FIRST
-    try {
-      const serverRes = await fetch('/api/youtube/playlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          playlistId,
-          apiKey: customApiKey?.trim() || undefined
-        })
-      });
-
-      if (serverRes.ok || serverRes.status === 400 || serverRes.status === 403 || serverRes.status === 404) {
-        const data: ServerYouTubePlaylistResponse = await serverRes.json();
-        if (data.success === true) {
-          return data.playlist;
-        } else {
-          const errData = data as ServerYouTubePlaylistError;
-          throw new YouTubeApiException(
-            errData.errorCode || 'YOUTUBE_NETWORK_ERROR',
-            errData.message || 'YouTube playlist error'
-          );
-        }
-      }
-    } catch (err: any) {
-      if (err instanceof YouTubeApiException) {
-        throw err;
-      }
-      // If server fetch failed with a network error, proceed to direct client attempt
-      console.warn('[YouTubePlaylistService] Server proxy unavailable, attempting direct client fetch...');
+    // 1. Google OAuth Token path (direct to Google)
+    if (oauthToken && oauthToken.trim()) {
+      return await this.fetchViaOfficialYouTubeAPI(playlistId, cleanPlaylistUrl, undefined, oauthToken.trim());
     }
 
-    // 2. Direct client-side official YouTube API attempt
-    const resolvedClientKey = this.getClientApiKey(customApiKey);
-    if (resolvedClientKey) {
-      try {
-        return await this.fetchViaOfficialYouTubeAPI(playlistId, cleanPlaylistUrl, resolvedClientKey);
-      } catch (err: any) {
-        if (err instanceof YouTubeApiException) {
-          throw err;
-        }
-        throw new YouTubeApiException('YOUTUBE_NETWORK_ERROR', err.message || 'Unable to reach YouTube API.');
-      }
+    // 2. User YouTube API Key path (direct to Google)
+    const resolvedKey = customApiKey?.trim() || this.getStoredApiKey();
+    if (resolvedKey) {
+      return await this.fetchViaOfficialYouTubeAPI(playlistId, cleanPlaylistUrl, resolvedKey, undefined);
     }
 
-    // 3. No key configured on server and no user key provided
-    // Attempt fallback mirror endpoints as last resort, strictly validating non-empty playable items
+    // 3. Fallback mirrors (only as last resort)
     try {
       return await this.fetchViaFallbackProxies(playlistId, cleanPlaylistUrl);
     } catch {
       throw new YouTubeApiException(
         'YOUTUBE_API_KEY_MISSING',
-        'A YouTube Data API v3 key is required to import playlists. Click "Get / Manage YouTube API Key" to create or view your key in Google Cloud Credentials, then enter it below.'
+        'A YouTube Data API v3 key or authorized Google Account is required to import playlists. Click "Connect Google" or "Get / Manage YouTube API Key" to configure your credentials.'
       );
     }
   }
@@ -334,25 +347,40 @@ export class YouTubePlaylistService {
   static async fetchViaOfficialYouTubeAPI(
     playlistId: string,
     cleanPlaylistUrl: string,
-    apiKey: string
+    apiKey?: string,
+    oauthToken?: string
   ): Promise<YouTubePlaylistPreview> {
-    if (!apiKey || !apiKey.trim()) {
+    const trimmedKey = apiKey?.trim();
+    const cleanToken = oauthToken?.trim();
+
+    if (!trimmedKey && !cleanToken) {
       throw new YouTubeApiException(
         'YOUTUBE_API_KEY_MISSING',
-        'A YouTube Data API v3 key is required to import playlists. Click "Get / Manage YouTube API Key" to configure your key.'
+        'A YouTube Data API v3 key or authorized Google Account is required to import playlists. Click "Connect Google" or "Get / Manage YouTube API Key" to configure your credentials.'
       );
     }
 
-    const trimmedKey = apiKey.trim();
+    const authHeaders: Record<string, string> = {};
+    if (cleanToken) {
+      authHeaders['Authorization'] = `Bearer ${cleanToken}`;
+    }
+    if (trimmedKey) {
+      authHeaders['x-goog-api-key'] = trimmedKey;
+    }
 
     // 1. Fetch Playlist Header Info via playlists.list (including snippet, contentDetails, status)
-    const playlistMetaUrl = `https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${encodeURIComponent(
+    let playlistMetaUrl = `https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails,status&id=${encodeURIComponent(
       playlistId
-    )}&key=${encodeURIComponent(trimmedKey)}`;
+    )}`;
+    if (trimmedKey) {
+      playlistMetaUrl += `&key=${encodeURIComponent(trimmedKey)}`;
+    }
 
     let playlistMetaRes: Response;
     try {
-      playlistMetaRes = await fetch(playlistMetaUrl);
+      playlistMetaRes = await fetch(playlistMetaUrl, {
+        headers: authHeaders
+      });
     } catch (networkErr: any) {
       throw new YouTubeApiException(
         'YOUTUBE_NETWORK_ERROR',
@@ -369,7 +397,7 @@ export class YouTubePlaylistService {
       if (reason === 'keyInvalid' || (status === 400 && errorObj?.message?.toLowerCase().includes('key'))) {
         throw new YouTubeApiException(
           'YOUTUBE_API_KEY_INVALID',
-          'YouTube rejected the API key (invalid key). Please check your key in Google Cloud Credentials.'
+          'YouTube rejected the credentials (invalid key/token). Please check your key in Google Cloud Credentials or reconnect your Google Account.'
         );
       }
       if (reason === 'quotaExceeded' || (status === 403 && errorObj?.message?.toLowerCase().includes('quota'))) {
@@ -391,13 +419,13 @@ export class YouTubePlaylistService {
       if (status === 403) {
         throw new YouTubeApiException(
           'YOUTUBE_API_FORBIDDEN',
-          'Access to the YouTube Data API is restricted or forbidden for this API key. Please check key restrictions in Google Cloud Console.'
+          'Access to the YouTube Data API is restricted or forbidden. Please verify permissions or reconnect your account.'
         );
       }
       if (status === 404) {
         throw new YouTubeApiException(
           'YOUTUBE_PLAYLIST_NOT_FOUND',
-          'Playlist not found. Please verify the playlist link is correct and set to Public or Unlisted.'
+          'Playlist not found. Please verify the playlist link is correct and accessible.'
         );
       }
 
@@ -421,10 +449,10 @@ export class YouTubePlaylistService {
     const playlistContentDetails = playlistItemMeta.contentDetails || {};
 
     const privacyStatus = (playlistStatus.privacyStatus || 'public').toLowerCase();
-    if (privacyStatus === 'private') {
+    if (privacyStatus === 'private' && !cleanToken) {
       throw new YouTubeApiException(
         'YOUTUBE_PLAYLIST_PRIVATE',
-        'This playlist is set to Private. Private playlists require account authorization and cannot be imported by URL. Please change the playlist to Public or Unlisted to import.'
+        'This playlist is set to Private. Private playlists require account authorization and cannot be imported by URL. Please change the playlist to Public or Unlisted, or connect your Google Account.'
       );
     }
 
@@ -452,20 +480,25 @@ export class YouTubePlaylistService {
     }[] = [];
     let skippedUnavailable = 0;
     let pageCount = 0;
-    const MAX_PAGES = 10; // Up to 500 items
+    const MAX_PAGES = 50; // Up to 2,500 items transparently
 
     do {
       pageCount++;
       let itemsUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails,status&playlistId=${encodeURIComponent(
         playlistId
-      )}&maxResults=50&key=${encodeURIComponent(trimmedKey)}`;
+      )}&maxResults=50`;
+      if (trimmedKey) {
+        itemsUrl += `&key=${encodeURIComponent(trimmedKey)}`;
+      }
       if (pageToken) {
         itemsUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
       }
 
       let itemsRes: Response;
       try {
-        itemsRes = await fetch(itemsUrl);
+        itemsRes = await fetch(itemsUrl, {
+          headers: authHeaders
+        });
       } catch (err: any) {
         throw new YouTubeApiException(
           'YOUTUBE_NETWORK_ERROR',
@@ -474,6 +507,10 @@ export class YouTubePlaylistService {
       }
 
       if (!itemsRes.ok) {
+        if (pageCount > 1) {
+          // If page 2+ encounters an error, retain the items retrieved so far and mark incomplete
+          break;
+        }
         const errJson = await itemsRes.json().catch(() => ({}));
         const errorObj = errJson?.error;
         const reason = errorObj?.errors?.[0]?.reason || '';
@@ -490,7 +527,10 @@ export class YouTubePlaylistService {
             'The items in this playlist are not accessible with the current credentials.'
           );
         }
-        break;
+        throw new YouTubeApiException(
+          'YOUTUBE_NETWORK_ERROR',
+          errorObj?.message || `YouTube API error while retrieving playlist items (${itemsRes.status})`
+        );
       }
 
       const itemsJson = await itemsRes.json();
@@ -503,15 +543,17 @@ export class YouTubePlaylistService {
         const videoId = (item.contentDetails?.videoId || snippet?.resourceId?.videoId || '').trim();
 
         // Safe handling of unavailable / deleted / private videos
+        // If user authorized with OAuth (cleanToken), authorized private videos accessible to their account are preserved
         const rawTitle = (snippet?.title || '').trim();
         const itemPrivacy = (status?.privacyStatus || '').toLowerCase();
+        const isUnauthorizedPrivate = !cleanToken && itemPrivacy === 'private';
 
         if (
           !videoId ||
           videoId.length !== 11 ||
           rawTitle === 'Private video' ||
           rawTitle === 'Deleted video' ||
-          itemPrivacy === 'private'
+          isUnauthorizedPrivate
         ) {
           skippedUnavailable++;
           continue;
@@ -560,12 +602,15 @@ export class YouTubePlaylistService {
 
     for (let i = 0; i < allVideoIds.length; i += 50) {
       const chunk = allVideoIds.slice(i, i + 50);
-      const videosUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,status&id=${chunk.join(
-        ','
-      )}&key=${encodeURIComponent(trimmedKey)}`;
+      let videosUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,status&id=${chunk.join(',')}`;
+      if (trimmedKey) {
+        videosUrl += `&key=${encodeURIComponent(trimmedKey)}`;
+      }
 
       try {
-        const videosRes = await fetch(videosUrl);
+        const videosRes = await fetch(videosUrl, {
+          headers: authHeaders
+        });
         if (videosRes.ok) {
           const videosJson = await videosRes.json();
           const videoItems = videosJson?.items || [];
@@ -615,7 +660,8 @@ export class YouTubePlaylistService {
       items: playlistItems,
       totalSongs: playlistItems.length,
       skippedUnavailable,
-      estimatedTotalDuration: calculateTotalDuration(playlistItems)
+      estimatedTotalDuration: calculateTotalDuration(playlistItems),
+      isComplete: !pageToken
     };
   }
 
@@ -766,13 +812,8 @@ export class YouTubePlaylistService {
       const item = selectedItems[idx];
       // Category assignment rule:
       // 1. Honor the user-reviewed category stored on the item if present
-      // 2. Fallback initialization rule:
-      //    - Exactly 2 songs: Song 1 (idx 0) -> praise, Song 2 (idx 1) -> worship
-      //    - 3 or more songs: Song 1 & 2 (idx < 2) -> praise, Song 3+ (idx >= 2) -> worship
-      const fallbackCategory: 'praise' | 'worship' =
-        selectedItems.length === 2
-          ? (idx === 0 ? 'praise' : 'worship')
-          : (idx < 2 ? 'praise' : 'worship');
+      // 2. Default rule: 1st & 2nd song Praise, 3rd+ Worship (for 2 songs: both Praise)
+      const fallbackCategory: 'praise' | 'worship' = idx < 2 ? 'praise' : 'worship';
       const assignedCategory: 'praise' | 'worship' = item.category || fallbackCategory;
 
       try {

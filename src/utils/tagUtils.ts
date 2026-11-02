@@ -123,3 +123,51 @@ export function sortTags(tags: string[], predefinedHierarchy: string[] = DEFAULT
     ...customTags
   ];
 }
+
+/**
+ * Returns consistent Tailwind badge color styles for member roles/tags:
+ * - Pastor: purple
+ * - Worship Leader: amber
+ * - Song Leader: sky / primary
+ * - Vocalist: emerald
+ * - Guitarist: orange
+ * - Keyboardist: teal
+ * - Bassist: rose
+ * - Drummer: red
+ * - Audio/Live: slate
+ * - Lyricist: indigo
+ * - Custom / other: zinc
+ */
+export function getTagColorStyle(tagName: string): string {
+  if (!tagName) return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+  const lower = tagName.trim().toLowerCase();
+
+  switch (lower) {
+    case 'pastor':
+      return 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800/60';
+    case 'worship leader':
+      return 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800/60';
+    case 'song leader':
+      return 'bg-sky-100 text-[#1b75bc] dark:bg-sky-950/70 dark:text-sky-300 border-sky-200 dark:border-sky-800/60';
+    case 'vocalist':
+      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60';
+    case 'guitarist':
+      return 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800/60';
+    case 'keyboardist':
+      return 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800/60';
+    case 'bassist':
+      return 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800/60';
+    case 'drummer':
+      return 'bg-red-100 text-red-800 dark:bg-red-950/70 dark:text-red-300 border-red-200 dark:border-red-800/60';
+    case 'audio/live':
+    case 'audio':
+    case 'audio engineer':
+      return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+    case 'lyricist':
+    case 'lyrics':
+      return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60';
+    default:
+      return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700';
+  }
+}
+

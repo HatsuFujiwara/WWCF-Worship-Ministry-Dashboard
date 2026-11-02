@@ -50,6 +50,10 @@ export class SongFamilyService {
   static async saveSongFamilies(families: SongFamily[]): Promise<void> {
     try {
       localStorage.setItem(SONG_FAMILIES_STORAGE_KEY, JSON.stringify(families));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('wwcf:families-updated', { detail: families }));
+        window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'families' } }));
+      }
     } catch (e) {
       console.error('Error saving song families:', e);
     }

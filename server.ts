@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
-import { YouTubePlaylistService, extractPlaylistId, YouTubeApiException } from "./src/services/youtubePlaylistService";
 
 interface TransferSession {
   sessionId: string;
@@ -27,7 +26,20 @@ interface TransferSession {
   };
 }
 
+const MAX_SESSIONS = 200;
+const MAX_RECORD_LIMIT = 5000;
 const transferSessions = new Map<string, TransferSession>();
+
+/**
+ * Timing-safe token comparison to prevent side-channel timing attacks
+ */
+function safeTokenCompare(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 // Cleanup expired sessions every 2 minutes
 setInterval(() => {
@@ -41,23 +53,41 @@ setInterval(() => {
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: "50mb" }));
+  // Parse command line arguments or environment variables
+  const portArgIndex = process.argv.indexOf('--port') !== -1 ? process.argv.indexOf('--port') : process.argv.indexOf('-p');
+  const hostArgIndex = process.argv.indexOf('--host') !== -1 ? process.argv.indexOf('--host') : process.argv.indexOf('-h');
+  const cliPort = portArgIndex !== -1 ? Number(process.argv[portArgIndex + 1]) : NaN;
+  const PORT = !isNaN(cliPort) && cliPort > 0 ? cliPort : (Number(process.env.PORT) || 3000);
+  const HOST = hostArgIndex !== -1 ? process.argv[hostArgIndex + 1] : (process.env.HOST || "0.0.0.0");
+
+  // HTTP Security Headers & Cache Management
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    if (req.path.startsWith("/api/")) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+    }
+    next();
+  });
+
+  // Limit JSON body size to 15MB
+  app.use(express.json({ limit: "15mb" }));
 
   // API routes FIRST
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
 
-  // MusicBrainz Metadata Proxy (Primary identity/metadata finder with required User-Agent)
+  // MusicBrainz Metadata Proxy (User-Agent header required by MusicBrainz API terms)
   app.get("/api/metadata/musicbrainz", async (req, res) => {
     try {
       const query = (req.query.query as string) || "";
       if (!query.trim()) {
         return res.status(400).json({ success: false, error: "Query parameter is required" });
       }
-
       const mbUrl = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json`;
       const response = await fetch(mbUrl, {
         headers: {
@@ -66,16 +96,14 @@ async function startServer() {
         },
         signal: AbortSignal.timeout(5000)
       });
-
       if (!response.ok) {
         return res.status(response.status).json({ success: false, error: `MusicBrainz error: ${response.statusText}` });
       }
-
       const data = await response.json();
       res.json({ success: true, data });
     } catch (err: any) {
       console.warn("MusicBrainz proxy fetch error:", err?.message || err);
-      res.status(502).json({ success: false, error: err?.message || "Failed to query MusicBrainz" });
+      res.status(502).json({ success: false, error: "Failed to query MusicBrainz" });
     }
   });
 
@@ -86,7 +114,6 @@ async function startServer() {
       if (!query.trim()) {
         return res.status(400).json({ success: false, error: "Query parameter is required" });
       }
-
       const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=5`;
       const response = await fetch(deezerUrl, {
         headers: {
@@ -94,101 +121,56 @@ async function startServer() {
         },
         signal: AbortSignal.timeout(5000)
       });
-
       if (!response.ok) {
         return res.status(response.status).json({ success: false, error: `Deezer error: ${response.statusText}` });
       }
-
       const data = await response.json();
       res.json({ success: true, data });
     } catch (err: any) {
       console.warn("Deezer proxy fetch error:", err?.message || err);
-      res.status(502).json({ success: false, error: err?.message || "Failed to query Deezer" });
+      res.status(502).json({ success: false, error: "Failed to query Deezer" });
     }
   });
 
-  // YouTube API status endpoint (safe, never exposes keys)
-  app.get("/api/youtube/status", (req, res) => {
-    const serverKey = process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
-    const configured = Boolean(
-      serverKey &&
-      serverKey.trim() &&
-      serverKey !== "MY_YOUTUBE_API_KEY" &&
-      serverKey !== '""' &&
-      serverKey !== "''"
-    );
-    res.json({
-      configured,
-      provider: "youtube-data-api-v3"
-    });
-  });
 
-  // YouTube Playlist endpoint (secure server-side official API request)
-  app.post("/api/youtube/playlist", async (req, res) => {
-    try {
-      const { playlistId, apiKey } = req.body || {};
-      if (!playlistId || typeof playlistId !== "string" || !playlistId.trim()) {
-        return res.status(400).json({
-          success: false,
-          errorCode: "YOUTUBE_INVALID_URL",
-          message: "Invalid YouTube or YouTube Music playlist link. Please provide a valid playlist ID or URL."
-        });
-      }
-
-      const cleanPlaylistId = extractPlaylistId(playlistId) || playlistId.trim();
-      const cleanPlaylistUrl = `https://www.youtube.com/playlist?list=${cleanPlaylistId}`;
-
-      // Precedence: User-supplied custom key -> server YOUTUBE_API_KEY -> server VITE_YOUTUBE_API_KEY
-      const customKey = typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : undefined;
-      const serverKey = process.env.YOUTUBE_API_KEY || process.env.VITE_YOUTUBE_API_KEY;
-      const effectiveKey =
-        customKey ||
-        (serverKey && serverKey.trim() && serverKey !== "MY_YOUTUBE_API_KEY" && serverKey !== '""' && serverKey !== "''"
-          ? serverKey.trim()
-          : "");
-
-      if (!effectiveKey) {
-        return res.status(400).json({
-          success: false,
-          errorCode: "YOUTUBE_API_KEY_MISSING",
-          message:
-            "A YouTube Data API v3 key is required to import playlists. Click 'Get / Manage YouTube API Key' to create or view your key in Google Cloud Credentials, then enter it below."
-        });
-      }
-
-      const playlist = await YouTubePlaylistService.fetchViaOfficialYouTubeAPI(
-        cleanPlaylistId,
-        cleanPlaylistUrl,
-        effectiveKey
-      );
-
-      // Return safe normalized data without leaking any credentials
-      res.json({
-        success: true,
-        playlist
-      });
-    } catch (err: any) {
-      if (err instanceof YouTubeApiException) {
-        return res.status(400).json({
-          success: false,
-          errorCode: err.errorCode,
-          message: err.message
-        });
-      }
-      console.error("YouTube playlist API error:", err?.message || err);
-      res.status(500).json({
-        success: false,
-        errorCode: "YOUTUBE_NETWORK_ERROR",
-        message: err?.message || "An unexpected error occurred while fetching the YouTube playlist."
-      });
-    }
-  });
 
   // Create temporary transfer session (Supports PC -> Phone and Phone -> PC)
   app.post("/api/transfer/create", (req, res) => {
     try {
-      const { payload, direction = 'pc_to_phone', expiresInSeconds = 600 } = req.body;
-      
+      // Session cap check to prevent resource exhaustion
+      if (transferSessions.size >= MAX_SESSIONS) {
+        const now = Date.now();
+        for (const [id, s] of transferSessions.entries()) {
+          if (now > s.expiresAt) transferSessions.delete(id);
+        }
+        if (transferSessions.size >= MAX_SESSIONS) {
+          return res.status(429).json({
+            success: false,
+            error: "RATE_LIMITED",
+            message: "Active transfer session limit reached. Please wait a moment and try again."
+          });
+        }
+      }
+
+      const { payload, direction = 'pc_to_phone', expiresInSeconds = 600 } = req.body || {};
+
+      // Validate bounds on payload records if provided
+      if (payload?.data) {
+        const counts = [
+          Array.isArray(payload.data.members) ? payload.data.members.length : 0,
+          Array.isArray(payload.data.songs) ? payload.data.songs.length : 0,
+          Array.isArray(payload.data.schedules) ? payload.data.schedules.length : 0,
+          Array.isArray(payload.data.songFamilies) ? payload.data.songFamilies.length : 0
+        ];
+        if (counts.some(c => c > MAX_RECORD_LIMIT)) {
+          return res.status(400).json({
+            success: false,
+            error: "PAYLOAD_TOO_LARGE",
+            message: `Records exceed the maximum allowed limit of ${MAX_RECORD_LIMIT} items per category.`
+          });
+        }
+      }
+
       // If PC -> Phone, payload is required upfront.
       // If Phone -> PC, payload will be uploaded by the phone later.
       if (direction === 'pc_to_phone' && (!payload || !payload.data)) {
@@ -198,7 +180,8 @@ async function startServer() {
       const sessionId = `tr_${crypto.randomUUID()}`;
       const token = crypto.randomBytes(16).toString("hex");
       const createdAt = Date.now();
-      const expiresAt = createdAt + expiresInSeconds * 1000;
+      const clampedExpiresIn = Math.min(Math.max(Number(expiresInSeconds) || 600, 60), 3600);
+      const expiresAt = createdAt + clampedExpiresIn * 1000;
 
       const session: TransferSession = {
         sessionId,
@@ -226,7 +209,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Failed to create transfer session:", err);
-      res.status(500).json({ success: false, error: "SERVER_ERROR", message: err.message });
+      res.status(500).json({ success: false, error: "SERVER_ERROR", message: "Failed to initialize transfer session." });
     }
   });
 
@@ -241,7 +224,7 @@ async function startServer() {
         return res.status(404).json({ success: false, error: "NOT_FOUND", message: "Transfer session not found or has expired." });
       }
 
-      if (session.token !== token) {
+      if (!safeTokenCompare(session.token, token)) {
         return res.status(403).json({ success: false, error: "UNAUTHORIZED", message: "Invalid session token." });
       }
 
@@ -283,7 +266,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Error retrieving transfer session:", err);
-      res.status(500).json({ success: false, error: "SERVER_ERROR", message: err.message });
+      res.status(500).json({ success: false, error: "SERVER_ERROR", message: "Failed to retrieve transfer session." });
     }
   });
 
@@ -292,14 +275,14 @@ async function startServer() {
     try {
       const { sessionId } = req.params;
       const token = (req.body.token as string) || (req.query.token as string) || (req.headers["x-transfer-token"] as string);
-      const { payload } = req.body;
+      const { payload } = req.body || {};
 
       const session = transferSessions.get(sessionId);
       if (!session) {
         return res.status(404).json({ success: false, error: "NOT_FOUND", message: "Transfer session not found or has expired." });
       }
 
-      if (session.token !== token) {
+      if (!safeTokenCompare(session.token, token)) {
         return res.status(403).json({ success: false, error: "UNAUTHORIZED", message: "Invalid session token." });
       }
 
@@ -325,6 +308,21 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "INVALID_PAYLOAD", message: "Invalid transfer payload data." });
       }
 
+      // Record limit validation
+      const counts = [
+        Array.isArray(payload.data.members) ? payload.data.members.length : 0,
+        Array.isArray(payload.data.songs) ? payload.data.songs.length : 0,
+        Array.isArray(payload.data.schedules) ? payload.data.schedules.length : 0,
+        Array.isArray(payload.data.songFamilies) ? payload.data.songFamilies.length : 0
+      ];
+      if (counts.some(c => c > MAX_RECORD_LIMIT)) {
+        return res.status(400).json({
+          success: false,
+          error: "PAYLOAD_TOO_LARGE",
+          message: `Payload exceeds the allowed maximum limit of ${MAX_RECORD_LIMIT} records.`
+        });
+      }
+
       session.payload = payload;
       session.status = "data_ready";
 
@@ -335,7 +333,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Error uploading transfer data:", err);
-      res.status(500).json({ success: false, error: "SERVER_ERROR", message: err.message });
+      res.status(500).json({ success: false, error: "SERVER_ERROR", message: "Failed to upload transfer data." });
     }
   });
 
@@ -350,7 +348,7 @@ async function startServer() {
         return res.status(404).json({ success: false, error: "NOT_FOUND", status: "expired" });
       }
 
-      if (session.token !== token) {
+      if (!safeTokenCompare(session.token, token)) {
         return res.status(403).json({ success: false, error: "UNAUTHORIZED" });
       }
 
@@ -374,7 +372,7 @@ async function startServer() {
           hasDraft: Boolean(data.draft)
         } : undefined
       });
-    } catch (err: any) {
+    } catch (_err: any) {
       res.status(500).json({ success: false, error: "SERVER_ERROR" });
     }
   });
@@ -390,7 +388,7 @@ async function startServer() {
         return res.status(404).json({ success: false, error: "NOT_FOUND" });
       }
 
-      if (session.token !== token) {
+      if (!safeTokenCompare(session.token, token)) {
         return res.status(403).json({ success: false, error: "UNAUTHORIZED" });
       }
 
@@ -398,7 +396,7 @@ async function startServer() {
       delete session.payload;
 
       res.json({ success: true, message: "Transfer session completed successfully." });
-    } catch (err: any) {
+    } catch (_err: any) {
       res.status(500).json({ success: false, error: "SERVER_ERROR" });
     }
   });
@@ -410,13 +408,13 @@ async function startServer() {
       const token = (req.body.token as string) || (req.query.token as string) || (req.headers["x-transfer-token"] as string);
 
       const session = transferSessions.get(sessionId);
-      if (session && session.token === token) {
+      if (session && safeTokenCompare(session.token, token)) {
         session.status = "cancelled";
         delete session.payload;
       }
 
       res.json({ success: true, message: "Transfer session cancelled." });
-    } catch (err: any) {
+    } catch (_err: any) {
       res.status(500).json({ success: false, error: "SERVER_ERROR" });
     }
   });
@@ -431,13 +429,13 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
   });
 }
 

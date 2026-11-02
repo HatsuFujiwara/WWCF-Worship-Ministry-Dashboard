@@ -10,6 +10,7 @@ import { COMMON_THEMES } from '../utils/recommendationUtils';
 import { detectSongVersionType, resolveSongVersionType } from '../utils/versionDetectionUtils';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import { DuplicateSongModal } from './DuplicateSongModal';
+import { SwapTitleArtistButton } from './SwapTitleArtistButton';
 import {
   X,
   Youtube,
@@ -490,9 +491,9 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
               )}
             </div>
 
-            {/* Title & Artist */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
+            {/* Title & Artist with Swap Button */}
+            <div className="flex flex-col md:flex-row items-start md:items-end gap-2.5">
+              <div className="flex-1 w-full">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Song Title <span className="text-red-500">*</span>
                 </label>
@@ -506,7 +507,18 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
                 />
               </div>
 
-              <div>
+              <div className="self-center md:self-end pb-0.5 shrink-0">
+                <SwapTitleArtistButton
+                  onSwap={() => {
+                    const temp = title;
+                    setTitle(artist);
+                    setArtist(temp);
+                  }}
+                  disabled={!title.trim() && !artist.trim()}
+                />
+              </div>
+
+              <div className="flex-1 w-full">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Artist / Worship Leader
                 </label>

@@ -14,8 +14,10 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Database,
-  QrCode
+  QrCode,
+  BarChart3
 } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 export interface NavigationItem {
   id: ActiveTab;
@@ -28,6 +30,7 @@ export const MAIN_NAVIGATION_ITEMS: NavigationItem[] = [
   { id: 'scheduler', label: 'Song Scheduler', icon: Sliders },
   { id: 'songs', label: 'Song Database', icon: Music },
   { id: 'schedules', label: 'Saved Lineups', icon: CalendarDays },
+  { id: 'analytics', label: 'Report Builder', icon: BarChart3 },
   { id: 'members', label: 'Member Editor', icon: Users },
 ];
 
@@ -113,19 +116,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* ========================================================================= */}
         <div
           className={`h-14 border-b border-slate-200/70 dark:border-white/10 shrink-0 flex items-center ${
-            isCollapsedOnDesktop ? 'px-4 lg:px-0 lg:justify-center justify-between' : 'px-4 justify-between'
+            isCollapsedOnDesktop ? 'px-2 lg:px-0 lg:justify-center justify-between' : 'px-3 justify-between'
           }`}
         >
-          {/* Header text visible on expanded desktop and mobile drawer */}
+          {/* Brand logo for expanded desktop and mobile drawer */}
           <div
             className={`items-center gap-2 min-w-0 ${
               isCollapsedOnDesktop ? 'flex lg:hidden' : 'flex'
             }`}
           >
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Navigation
-            </span>
+            <BrandLogo
+              collapsed={false}
+              size="sm"
+              onClick={() => {
+                setActiveTab('dashboard');
+                if (window.innerWidth < 1024) setIsOpen(false);
+              }}
+            />
           </div>
+
+          {/* Collapsed desktop icon logo */}
+          {isCollapsedOnDesktop && (
+            <div className="hidden lg:flex items-center justify-center">
+              <BrandLogo
+                collapsed={true}
+                size="sm"
+                onClick={() => {
+                  setActiveTab('dashboard');
+                }}
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-1">
             {/* Desktop Collapse / Expand toggle button */}

@@ -51,11 +51,23 @@ import {
   PanelLeft,
   PanelRight,
   Edit3,
-  CornerDownLeft
+  CornerDownLeft,
+  Cloud,
+  CloudOff,
+  LogOut,
+  ShieldCheck,
+  Youtube,
+  RefreshCw as RefreshIcon,
+  EyeOff,
+  ExternalLink,
+  Key
 } from 'lucide-react';
 import { speechAssistant } from '../utils/speechAssistant';
 import { cancelHaptic } from '../utils/haptics';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
+import { GoogleAuthService, GoogleSyncStatus, GoogleUserProfile } from '../services/googleAuthService';
+import { YouTubePlaylistService } from '../services/youtubePlaylistService';
+
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -103,6 +115,126 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [recordingActionId, setRecordingActionId] = useState<string | null>(null);
   const [shortcutConflict, setShortcutConflict] = useState<string | null>(null);
   const [shortcutMobileTab, setShortcutMobileTab] = useState<'default' | 'custom'>('default');
+
+  // Google Account & Cloud Backup State
+  const [googleStatus, setGoogleStatus] = useState<GoogleSyncStatus>(GoogleAuthService.getStatus());
+  const [googleProfile, setGoogleProfile] = useState<GoogleUserProfile | null>(GoogleAuthService.getUserProfile());
+  const [googleLastSync, setGoogleLastSync] = useState<string | null>(GoogleAuthService.getLastSyncedAt());
+  const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
+  const [showAdvancedGoogle, setShowAdvancedGoogle] = useState(false);
+  const [clientIdInput, setClientIdInput] = useState(() => GoogleAuthService.getClientId());
+  const [includeDraftCloud, setIncludeDraftCloud] = useState(() => StorageService.getIncludeDraftInCloudBackup());
+  const isEnvClientIdConfigured = Boolean((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID);
+
+  // YouTube API Key State
+  const [youtubeKeyInput, setYoutubeKeyInput] = useState(() => YouTubePlaylistService.getStoredApiKey());
+  const [rememberYoutubeKey, setRememberYoutubeKey] = useState(() => YouTubePlaylistService.isKeyRemembered());
+  const [isYoutubeKeyRevealed, setIsYoutubeKeyRevealed] = useState(false);
+  const [youtubeKeyConfigured, setYoutubeKeyConfigured] = useState(() => YouTubePlaylistService.isKeyConfigured());
+
+  useEffect(() => {
+    const unsubscribe = GoogleAuthService.subscribe((state) => {
+      setGoogleStatus(state.status);
+      setGoogleProfile(state.profile);
+      setGoogleLastSync(state.lastSyncedAt);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    setIsSyncingGoogle(true);
+    try {
+      await GoogleAuthService.requestToken();
+      showToast?.('Google Account connected. Checking Google Drive for backups...', 'info');
+      await GoogleAuthService.reconcileCloudBackup();
+    } catch (err: any) {
+      showToast?.(err?.message || 'Google authorization failed', 'danger');
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  };
+
+  const handleSyncGoogleNow = async () => {
+    setIsSyncingGoogle(true);
+    try {
+      if (!GoogleAuthService.isDriveReconciled()) {
+        const recon = await GoogleAuthService.reconcileCloudBackup();
+        if (recon.state === 'no_backup') {
+          const res = await GoogleAuthService.confirmFirstBackup();
+          if (res.status === 'saved') {
+            showToast?.('Initial Google Drive cloud backup created successfully!', 'success');
+          } else {
+            showToast?.(res.error || 'Failed to initialize Google Drive backup', 'danger');
+          }
+          return;
+        } else if (recon.state === 'conflict') {
+          showToast?.('Cloud backup conflict detected. Please review and choose a resolution.', 'info');
+          return;
+        } else if (recon.state === 'multiple_candidates') {
+          showToast?.('Multiple backup files found in Drive. Please select one.', 'info');
+          return;
+        } else if (recon.state === 'error') {
+          showToast?.(recon.error || 'Failed to check Google Drive backup', 'danger');
+          return;
+        }
+      }
+
+      const res = await GoogleAuthService.syncNow();
+      if (res.status === 'saved') {
+        showToast?.('Google Drive cloud backup updated successfully!', 'success');
+      } else if (res.status === 'conflict') {
+        showToast?.('Cloud backup conflict detected. Please review and choose a resolution.', 'info');
+      } else if (res.status === 'error') {
+        showToast?.(res.error || 'Failed to update Google Drive cloud backup', 'danger');
+      } else if (res.status === 'candidates_found') {
+        showToast?.('Multiple backup files found in Drive. Please select one.', 'info');
+      } else {
+        showToast?.(res.error || 'Google Drive backup not ready.', 'info');
+      }
+    } catch (err: any) {
+      showToast?.(err?.message || 'Cloud backup failed', 'danger');
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  };
+
+  const handleDisconnectGoogle = () => {
+    GoogleAuthService.disconnect();
+    showToast?.('Google Account disconnected. Local data remains intact.', 'info');
+  };
+
+  const handleSaveYoutubeKey = () => {
+    const trimmed = youtubeKeyInput.trim();
+    if (!trimmed) {
+      handleClearYoutubeKey();
+      return;
+    }
+    const isValidFormat = YouTubePlaylistService.validateKeyFormat(trimmed);
+    if (!isValidFormat) {
+      showToast?.('Note: Key does not match standard Google format (starts with AIzaSy...), but was saved.', 'info');
+    }
+    YouTubePlaylistService.setApiKey(trimmed, rememberYoutubeKey);
+    setYoutubeKeyConfigured(true);
+    showToast?.(
+      rememberYoutubeKey
+        ? 'YouTube API key saved and remembered on this device.'
+        : 'YouTube API key active in memory for this session.',
+      'success'
+    );
+  };
+
+  const handleClearYoutubeKey = () => {
+    YouTubePlaylistService.clearApiKey();
+    setYoutubeKeyInput('');
+    setRememberYoutubeKey(false);
+    setYoutubeKeyConfigured(false);
+    showToast?.('YouTube API key cleared from memory and device.', 'info');
+  };
+
+  const handleSaveClientId = () => {
+    GoogleAuthService.setClientIdOverride(clientIdInput);
+    showToast?.('Google Client ID configuration updated', 'success');
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -1201,6 +1333,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </SettingRow>
 
+                    <SettingRow icon={<BookOpen className="w-3 h-3 text-emerald-500" />} label="Reading Focus Mode" tooltip="Enhances text line-height and relaxed character spacing for easier reading">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400">{accessibility.readingMode ? 'ON' : 'OFF'}</span>
+                        <Switch checked={Boolean(accessibility.readingMode)} onChange={() => handleToggleAccessibility('readingMode')} label="Reading Focus Mode" />
+                      </div>
+                    </SettingRow>
+
                     <SettingRow icon={<Info className="w-3 h-3 text-indigo-500" />} label="Reading Scope" tooltip="Controls what text is read by the speech navigator">
                       <select
                         value={accessibility.ttsReadingScope || 'all'}
@@ -1383,6 +1522,264 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <RotateCcw className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
                 <span>Reset</span>
               </button>
+            </div>
+          </div>
+
+          {/* Section: Google Account & Cloud Backup */}
+          <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                <Cloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                Google Account & Cloud Backup
+              </span>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  googleStatus === 'connected' || googleStatus === 'saved'
+                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                    : googleStatus === 'syncing' || googleStatus === 'connecting'
+                    ? 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 animate-pulse'
+                    : googleStatus === 'conflict'
+                    ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                {googleStatus === 'connected' || googleStatus === 'saved'
+                  ? 'Connected'
+                  : googleStatus === 'syncing'
+                  ? 'Syncing...'
+                  : googleStatus === 'connecting'
+                  ? 'Connecting...'
+                  : googleStatus === 'conflict'
+                  ? 'Conflict'
+                  : 'Disconnected'}
+              </span>
+            </div>
+
+            {googleStatus === 'connected' || googleStatus === 'saved' || googleStatus === 'syncing' ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {googleProfile?.picture ? (
+                      <img src={googleProfile.picture} alt="" className="w-7 h-7 rounded-full shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                        {googleProfile?.name?.charAt(0) || 'G'}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                        {googleProfile?.name || 'Google Account'}
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        {googleProfile?.email || 'Connected'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDisconnectGoogle}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
+                    title="Disconnect Google Account"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 px-1">
+                  <span>Last Cloud Sync:</span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-200">
+                    {googleLastSync ? new Date(googleLastSync).toLocaleString() : 'Just now'}
+                  </span>
+                </div>
+
+                <div className="pt-1 border-t border-blue-100 dark:border-blue-900/40">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeDraftCloud}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIncludeDraftCloud(checked);
+                        StorageService.setIncludeDraftInCloudBackup(checked);
+                        showToast?.(
+                          checked
+                            ? 'Lineup draft will now be included in cloud backup.'
+                            : 'Lineup draft excluded from cloud backup.',
+                          'info'
+                        );
+                      }}
+                      className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-xs text-slate-700 dark:text-slate-300">
+                      Include current lineup draft in cloud backup
+                    </span>
+                  </label>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSyncGoogleNow}
+                    disabled={isSyncingGoogle}
+                    className="flex-1 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs disabled:opacity-60"
+                  >
+                    <RefreshIcon className={`w-3.5 h-3.5 ${isSyncingGoogle ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingGoogle ? 'Syncing...' : 'Sync to Drive Now'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Sign in with Google to automatically back up your ministry data to personal Google Drive (<code className="text-[11px] bg-white dark:bg-slate-900 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-800">WWCF_Santa_Cruz_Worship_Ministry_Backup.json</code>) and import YouTube playlists without needing a manual API key.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleConnectGoogle}
+                  disabled={isSyncingGoogle}
+                  className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-2xs disabled:opacity-60"
+                >
+                  <Cloud className="w-4 h-4" />
+                  <span>{isSyncingGoogle ? 'Connecting...' : 'Connect Google Account'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Advanced Client ID settings toggle */}
+            <div className="pt-1 border-t border-blue-200/60 dark:border-blue-900/40">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedGoogle(!showAdvancedGoogle)}
+                className="text-[11px] text-blue-700 dark:text-blue-400 font-semibold hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <span>{showAdvancedGoogle ? '▼ Hide Developer / Admin Override' : '▶ Developer / Admin Override (Optional)'}</span>
+              </button>
+
+              {showAdvancedGoogle && (
+                <div className="mt-2 p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Google OAuth Web Client ID:
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        isEnvClientIdConfigured
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                      }`}
+                    >
+                      {isEnvClientIdConfigured ? 'Active via VITE_GOOGLE_CLIENT_ID' : 'Not configured in env'}
+                    </span>
+                  </div>
+
+                  <input
+                    type="text"
+                    value={clientIdInput}
+                    onChange={(e) => setClientIdInput(e.target.value)}
+                    placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com"
+                    className="w-full px-2.5 py-1.5 text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none"
+                  />
+                  <div className="flex justify-between items-center pt-1">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                      Standard users do not need to configure this. App owners set VITE_GOOGLE_CLIENT_ID in the AI Studio environment dialog.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSaveClientId}
+                      className="px-2.5 py-1 bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-[11px] font-bold rounded-md transition-colors cursor-pointer shrink-0 ml-2"
+                    >
+                      Save Override
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section: Optional YouTube Data API v3 Key */}
+          <div data-tour="youtube-api-key" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Youtube className="w-3.5 h-3.5 text-rose-600" />
+                YouTube Data API v3 Key (Optional Fallback)
+              </span>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  youtubeKeyConfigured
+                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                {youtubeKeyConfigured ? 'Configured' : 'Not Configured'}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Optional fallback for importing public and unlisted YouTube playlists without Google Account authorization. Does not sign you in, authorize Google Drive, or access private playlists.
+            </p>
+
+            <div className="space-y-2">
+              <div className="relative">
+                <input
+                  type={isYoutubeKeyRevealed ? 'text' : 'password'}
+                  value={youtubeKeyInput}
+                  onChange={(e) => setYoutubeKeyInput(e.target.value)}
+                  placeholder="Paste your YouTube Data API v3 Key (AIzaSy...)"
+                  className="w-full pr-10 pl-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsYoutubeKeyRevealed(!isYoutubeKeyRevealed)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                  aria-label={isYoutubeKeyRevealed ? 'Hide API Key' : 'Reveal API Key'}
+                >
+                  {isYoutubeKeyRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberYoutubeKey}
+                  onChange={(e) => setRememberYoutubeKey(e.target.checked)}
+                  className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                />
+                <span>
+                  Remember on this device <span className="text-[10px] text-slate-400">(Stored unencrypted in browser localStorage. Excluded from cloud sync, backups, and transfers.)</span>
+                </span>
+              </label>
+
+              <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium"
+                >
+                  <span>Get / Manage Key in Google Cloud</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+
+                <div className="flex items-center gap-2">
+                  {youtubeKeyConfigured && (
+                    <button
+                      type="button"
+                      onClick={handleClearYoutubeKey}
+                      className="py-1 px-2.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 text-xs font-semibold hover:bg-rose-50 cursor-pointer shadow-2xs"
+                    >
+                      Clear Key
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSaveYoutubeKey}
+                    className="py-1 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer shadow-2xs transition-colors"
+                  >
+                    Save Key
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

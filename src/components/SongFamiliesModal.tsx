@@ -75,7 +75,7 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
   const { zIndex, isTopmost, isBlocked } = useOverlay({
     id: 'song-families-modal',
     isOpen,
-    layer: OverlayLayer.MODAL,
+    layer: OverlayLayer.FLOATING_PANEL,
     onClose,
     closeOnEscape: true
   });
@@ -447,20 +447,27 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
       style={{ zIndex }}
       data-overlay-id="song-families-modal"
       data-overlay-topmost={isTopmost}
-      className={`fixed inset-0 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/75 backdrop-blur-xs backdrop-enter-animation transition-opacity duration-200 ${
-        isBlocked ? 'pointer-events-none select-none opacity-40' : ''
+      className={`fixed inset-0 pointer-events-none transition-opacity duration-200 ${
+        isBlocked ? 'select-none opacity-40' : ''
       }`}
-      onClick={isBlocked ? undefined : onClose}
       aria-hidden={isBlocked}
       inert={isBlocked ? true : undefined}
     >
+      {/* Mobile-only backdrop */}
+      <div
+        className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs sm:hidden pointer-events-auto"
+        onClick={isBlocked ? undefined : onClose}
+        aria-hidden="true"
+      />
+
+      {/* Floating Follow-Viewport Panel (Desktop) / Bottom Sheet (Mobile) */}
       <div
         ref={modalRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="song-families-modal-title"
         aria-describedby="song-families-modal-desc"
-        className="relative w-full max-w-2xl wwcf-glass-modal rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[88vh] my-auto transform modal-enter-animation text-slate-900 dark:text-slate-100"
+        className="pointer-events-auto fixed bottom-0 inset-x-0 sm:bottom-6 sm:right-6 sm:left-auto sm:top-auto sm:w-[560px] sm:max-w-[calc(100vw-3rem)] max-h-[90dvh] sm:max-h-[85vh] wwcf-glass-modal rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col transform modal-enter-animation text-slate-900 dark:text-slate-100 ring-1 ring-slate-900/5 dark:ring-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Live region for screen readers */}

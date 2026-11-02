@@ -301,3 +301,82 @@ export function validateUniqueMemberRoles(
 
   return { isValid: true };
 }
+
+/**
+ * Validates ministry exclusivity for a member's tags:
+ * - Pastor and Worship Leader are classification/hierarchy-only tags.
+ * - Vocal roles: Song Leader, Vocalist (Song Leader may also be Vocalist).
+ * - Musician roles: Guitarist, Keyboardist, Bassist, Drummer (exclusive).
+ * - AV/Tech roles: Audio/Live Technician, Lyricist (the only permitted dual-ministry combination is Audio/Live Technician + Lyricist).
+ */
+export function validateMinistryExclusivity(labels: string[]): { isValid: boolean; errorMessage?: string } {
+  if (!labels || labels.length <= 1) return { isValid: true };
+
+  // Filter out classification/hierarchy tags (Pastor, Worship Leader)
+  const ministryTags = labels
+    .map((l) => l.trim())
+    .filter((l) => !isUniqueHierarchyTag(l) && l.toLowerCase() !== 'pastor' && l.toLowerCase() !== 'worship leader');
+
+  if (ministryTags.length <= 1) return { isValid: true };
+
+  const lowerSet = new Set(ministryTags.map((t) => t.toLowerCase()));
+
+  // Permitted exception: Audio/Live Technician + Lyricist
+  const isAudioLyricistDual =
+    lowerSet.size === 2 &&
+    lowerSet.has('audio/live technician') &&
+    lowerSet.has('lyricist');
+  if (isAudioLyricistDual) {
+    return { isValid: true };
+  }
+
+  // Vocalist + Song Leader combination
+  const isVocalCombo =
+    lowerSet.size === 2 &&
+    lowerSet.has('song leader') &&
+    lowerSet.has('vocalist');
+  if (isVocalCombo) {
+    return { isValid: true };
+  }
+
+  // Check instrument exclusivity
+  const instruments = ['guitarist', 'keyboardist', 'bassist', 'drummer'];
+  const presentInstruments = instruments.filter((inst) => lowerSet.has(inst));
+
+  if (presentInstruments.length > 1) {
+    const formatted = presentInstruments.map((i) => i.charAt(0).toUpperCase() + i.slice(1)).join(', ');
+    return {
+      isValid: false,
+      errorMessage: `A musician cannot belong to multiple instrument ministries (${formatted}). Each instrument ministry is exclusive.`
+    };
+  }
+
+  if (presentInstruments.length === 1) {
+    const hasTech = lowerSet.has('audio/live technician') || lowerSet.has('lyricist');
+    const hasVocal = lowerSet.has('song leader') || lowerSet.has('vocalist');
+    if (hasTech || hasVocal) {
+      return {
+        isValid: false,
+        errorMessage: `Musicians cannot belong to multiple ministries. The only permitted dual-ministry combination is Audio/Live Technician + Lyricist.`
+      };
+    }
+  }
+
+  const hasTech = lowerSet.has('audio/live technician') || lowerSet.has('lyricist');
+  const hasVocal = lowerSet.has('song leader') || lowerSet.has('vocalist');
+  if (hasTech && hasVocal) {
+    return {
+      isValid: false,
+      errorMessage: `Members cannot belong to multiple ministries. The only permitted dual-ministry combination is Audio/Live Technician + Lyricist.`
+    };
+  }
+
+  if (ministryTags.length > 2) {
+    return {
+      isValid: false,
+      errorMessage: `Members cannot belong to multiple ministries. The only permitted dual-ministry combination is Audio/Live Technician + Lyricist.`
+    };
+  }
+
+  return { isValid: true };
+}

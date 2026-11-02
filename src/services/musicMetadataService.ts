@@ -767,67 +767,11 @@ export async function fetchMultiSourceMetadata(
     recordSuccess('YouTube');
   }
 
-  // Update query with parsed title/artist if available
+  // Update active title/artist from YouTube / YouTube Music
   let activeTitle = meta.title || existingSong?.title || (isUrl ? '' : rawInput);
   let activeArtist = meta.artist || searchArtist;
 
-  // 3. MusicBrainz (PRIMARY identity/metadata finder)
-  sourcesQueried.push('MusicBrainz (Primary)');
-  if (activeTitle) {
-    const mbResult = await fetchMusicBrainzMetadata(activeTitle, activeArtist);
-    if (mbResult) {
-      if (mbResult.title) {
-        meta.title = mbResult.title;
-        activeTitle = mbResult.title;
-      }
-      if (mbResult.artist) {
-        meta.artist = mbResult.artist;
-        activeArtist = mbResult.artist;
-      }
-      if (mbResult.album) meta.album = mbResult.album;
-      if (mbResult.releaseYear) meta.releaseYear = mbResult.releaseYear;
-      if (mbResult.duration) meta.duration = mbResult.duration;
-      if (mbResult.isrc) meta.isrc = mbResult.isrc;
-      recordSuccess('MusicBrainz (Primary)');
-    }
-  }
-
-  // 4. Deezer (SECONDARY fallback when MusicBrainz has no match, or for high-res cover art)
-  const needsDeezer = !sourcesSucceeded.includes('MusicBrainz (Primary)') || !meta.coverArtUrl || !meta.album;
-  if (activeTitle && needsDeezer) {
-    sourcesQueried.push('Deezer (Secondary Fallback)');
-    const deezerResult = await fetchDeezerMetadata(activeTitle, activeArtist);
-    if (deezerResult) {
-      if (!meta.title && deezerResult.title) meta.title = deezerResult.title;
-      if (!meta.artist && deezerResult.artist) meta.artist = deezerResult.artist;
-      if (!meta.album && deezerResult.album) meta.album = deezerResult.album;
-      if (!meta.coverArtUrl && deezerResult.coverArtUrl) meta.coverArtUrl = deezerResult.coverArtUrl;
-      if (!meta.duration && deezerResult.duration) meta.duration = deezerResult.duration;
-      if (!meta.isrc && deezerResult.isrc) meta.isrc = deezerResult.isrc;
-      if (deezerResult.deezerUrl) meta.deezerUrl = deezerResult.deezerUrl;
-      recordSuccess('Deezer (Secondary Fallback)');
-    }
-  }
-
-  // 5. Apple Music / iTunes Search API
-  sourcesQueried.push('Apple Music');
-  if (activeTitle) {
-    const appleResult = await fetchAppleMusicMetadata(activeTitle, activeArtist);
-    if (appleResult) {
-      if (!meta.title && appleResult.title) meta.title = appleResult.title;
-      if (!meta.artist && appleResult.artist) meta.artist = appleResult.artist;
-      if (appleResult.album) meta.album = appleResult.album;
-      if (appleResult.releaseYear) meta.releaseYear = appleResult.releaseYear;
-      if (appleResult.duration) meta.duration = appleResult.duration;
-      if (appleResult.genre) meta.genre = appleResult.genre;
-      if (appleResult.coverArtUrl) meta.coverArtUrl = appleResult.coverArtUrl;
-      if (appleResult.appleMusicUrl) meta.appleMusicUrl = appleResult.appleMusicUrl;
-      if (appleResult.isrc) meta.isrc = appleResult.isrc;
-      recordSuccess('Apple Music');
-    }
-  }
-
-  // 4. Spotify
+  // 2. Spotify
   sourcesQueried.push('Spotify');
   const spotifyResult = await fetchSpotifyMetadata(rawInput);
   if (spotifyResult) {
@@ -838,7 +782,9 @@ export async function fetchMultiSourceMetadata(
     recordSuccess('Spotify');
   }
 
-  // 5. Qobuz
+  // 3. Qobuz
+  activeTitle = meta.title || existingSong?.title || (isUrl ? '' : rawInput);
+  activeArtist = meta.artist || searchArtist;
   sourcesQueried.push('Qobuz');
   if (activeTitle) {
     const qobuzResult = await fetchQobuzMetadata(activeTitle, activeArtist);
@@ -853,13 +799,68 @@ export async function fetchMultiSourceMetadata(
     }
   }
 
-  // 6. TIDAL
+  // 4. TIDAL
   sourcesQueried.push('TIDAL');
   const tidalResult = await fetchTidalMetadata(rawInput);
   if (tidalResult) {
     if (tidalResult.tidalUrl) meta.tidalUrl = tidalResult.tidalUrl;
     if (!meta.coverArtUrl && tidalResult.coverArtUrl) meta.coverArtUrl = tidalResult.coverArtUrl;
     recordSuccess('TIDAL');
+  }
+
+  // 5. Apple Music / iTunes Search API
+  activeTitle = meta.title || existingSong?.title || (isUrl ? '' : rawInput);
+  activeArtist = meta.artist || searchArtist;
+  sourcesQueried.push('Apple Music');
+  if (activeTitle) {
+    const appleResult = await fetchAppleMusicMetadata(activeTitle, activeArtist);
+    if (appleResult) {
+      if (!meta.title && appleResult.title) meta.title = appleResult.title;
+      if (!meta.artist && appleResult.artist) meta.artist = appleResult.artist;
+      if (!meta.album && appleResult.album) meta.album = appleResult.album;
+      if (!meta.releaseYear && appleResult.releaseYear) meta.releaseYear = appleResult.releaseYear;
+      if (!meta.duration && appleResult.duration) meta.duration = appleResult.duration;
+      if (!meta.genre && appleResult.genre) meta.genre = appleResult.genre;
+      if (!meta.coverArtUrl && appleResult.coverArtUrl) meta.coverArtUrl = appleResult.coverArtUrl;
+      if (appleResult.appleMusicUrl) meta.appleMusicUrl = appleResult.appleMusicUrl;
+      if (!meta.isrc && appleResult.isrc) meta.isrc = appleResult.isrc;
+      recordSuccess('Apple Music');
+    }
+  }
+
+  // 6. MusicBrainz (Fallback only for missing fields, NEVER overwrites title/artist)
+  activeTitle = meta.title || existingSong?.title || (isUrl ? '' : rawInput);
+  activeArtist = meta.artist || searchArtist;
+  if (activeTitle) {
+    sourcesQueried.push('MusicBrainz (Fallback)');
+    const mbResult = await fetchMusicBrainzMetadata(activeTitle, activeArtist);
+    if (mbResult) {
+      if (!meta.title && mbResult.title) meta.title = mbResult.title;
+      if (!meta.artist && mbResult.artist) meta.artist = mbResult.artist;
+      if (!meta.album && mbResult.album) meta.album = mbResult.album;
+      if (!meta.releaseYear && mbResult.releaseYear) meta.releaseYear = mbResult.releaseYear;
+      if (!meta.duration && mbResult.duration) meta.duration = mbResult.duration;
+      if (!meta.isrc && mbResult.isrc) meta.isrc = mbResult.isrc;
+      recordSuccess('MusicBrainz (Fallback)');
+    }
+  }
+
+  // 7. Deezer (Fallback only for missing fields, NEVER overwrites title/artist)
+  activeTitle = meta.title || existingSong?.title || (isUrl ? '' : rawInput);
+  activeArtist = meta.artist || searchArtist;
+  if (activeTitle && (!meta.title || !meta.artist || !meta.coverArtUrl || !meta.album)) {
+    sourcesQueried.push('Deezer (Fallback)');
+    const deezerResult = await fetchDeezerMetadata(activeTitle, activeArtist);
+    if (deezerResult) {
+      if (!meta.title && deezerResult.title) meta.title = deezerResult.title;
+      if (!meta.artist && deezerResult.artist) meta.artist = deezerResult.artist;
+      if (!meta.album && deezerResult.album) meta.album = deezerResult.album;
+      if (!meta.coverArtUrl && deezerResult.coverArtUrl) meta.coverArtUrl = deezerResult.coverArtUrl;
+      if (!meta.duration && deezerResult.duration) meta.duration = deezerResult.duration;
+      if (!meta.isrc && deezerResult.isrc) meta.isrc = deezerResult.isrc;
+      if (deezerResult.deezerUrl) meta.deezerUrl = deezerResult.deezerUrl;
+      recordSuccess('Deezer (Fallback)');
+    }
   }
 
   // 7. Songlink / Odesli (cross-platform discovery)

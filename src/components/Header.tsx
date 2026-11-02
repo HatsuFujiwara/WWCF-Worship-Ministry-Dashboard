@@ -81,6 +81,11 @@ export const Header: React.FC<HeaderProps> = ({
       section: 'Team',
       title: 'Member Editor & Roster',
       subtitle: 'Manage vocalists, musicians, technician assignments, and eligibility'
+    },
+    analytics: {
+      section: 'Reports',
+      title: 'Report Builder',
+      subtitle: 'Compile worship lineups and song insights.'
     }
   };
 

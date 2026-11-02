@@ -83,6 +83,10 @@ export class SongService {
   static async saveSongsList(songs: Song[]): Promise<void> {
     try {
       localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('wwcf:songs-updated', { detail: songs }));
+        window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'songs' } }));
+      }
     } catch (e) {
       console.error('Error saving songs list:', e);
     }
@@ -314,6 +318,11 @@ export class SongService {
       } catch (err) {
         console.error('Error synchronizing song rename across schedules:', err);
       }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('wwcf:songs-updated', { detail: savedSong }));
+      window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'songs' } }));
     }
 
     return savedSong;

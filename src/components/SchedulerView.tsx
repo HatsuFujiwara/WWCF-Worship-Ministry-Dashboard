@@ -1395,15 +1395,10 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     let worshipImported = importedSongs.filter((s) => s.category === 'worship');
 
     // Fallback if neither song had an explicit category:
+    // Rule: 1st & 2nd song Praise, 3rd+ Worship (for 2 songs: both Praise)
     if (praiseImported.length === 0 && worshipImported.length === 0) {
-      if (importedSongs.length === 2) {
-        // Explicit 2-item rule: item 1 is Praise and item 2 is Worship
-        praiseImported = [importedSongs[0]];
-        worshipImported = [importedSongs[1]];
-      } else {
-        praiseImported = importedSongs.slice(0, 2);
-        worshipImported = importedSongs.slice(2);
-      }
+      praiseImported = importedSongs.slice(0, 2);
+      worshipImported = importedSongs.slice(2);
     }
 
     const praiseTitles = praiseImported.map((s) => s.title);
@@ -1596,7 +1591,22 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       .flatMap((r) => getAssignmentMembers(r))
       .filter((m) => Boolean(m.memberId) || (m.memberName && m.memberName !== 'Unassigned' && m.memberName !== '—' && m.memberName !== ''));
 
-    const hasTwoSeparateFilledLeaders = filledPraiseLeaders.length > 0 && filledWorshipLeaders.length > 0;
+    const praiseLeaderId = filledPraiseLeaders[0]?.memberId;
+    const worshipLeaderId = filledWorshipLeaders[0]?.memberId;
+    const praiseLeaderName = (filledPraiseLeaders[0]?.memberName || '').toLowerCase().trim();
+    const worshipLeaderName = (filledWorshipLeaders[0]?.memberName || '').toLowerCase().trim();
+
+    const isSamePersonInBoth = Boolean(
+      (praiseLeaderId && worshipLeaderId && praiseLeaderId === worshipLeaderId) ||
+      (!praiseLeaderId && !worshipLeaderId && praiseLeaderName && worshipLeaderName && praiseLeaderName === worshipLeaderName && praiseLeaderName !== 'unassigned' && praiseLeaderName !== '—')
+    );
+
+    // Two-leader mode strictly requires two distinct eligible people.
+    // If the same member ID is assigned in both Praise and Worship leader rows, normalize to one-leader state.
+    const hasTwoSeparateFilledLeaders =
+      filledPraiseLeaders.length > 0 &&
+      filledWorshipLeaders.length > 0 &&
+      !isSamePersonInBoth;
 
     const distinctAssignedLeaderIds = Array.from(
       new Set(
@@ -1607,8 +1617,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     );
 
     const isTwoLeaders =
-      distinctAssignedLeaderIds.length >= 2 ||
-      hasTwoSeparateFilledLeaders;
+      !isSamePersonInBoth &&
+      (distinctAssignedLeaderIds.length >= 2 || hasTwoSeparateFilledLeaders);
 
     if (!isTwoLeaders) {
       // ONE SONG LEADER MODE
@@ -2264,8 +2274,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 options={[
                   { value: 'Sunday Service', label: 'Sunday Service' },
                   { value: 'Midweek Prayer Service', label: 'Midweek Prayer Service' },
-                  { value: 'Youth Service', label: 'Youth Service' },
-                  { value: 'Special Worship Event', label: 'Special Worship Event' }
+                  { value: 'Youth Fellowship', label: 'Youth Fellowship' },
+                  { value: 'Worship Event', label: 'Worship Event' }
                 ]}
                 aria-label="Service Type"
               />
@@ -3023,9 +3033,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                           allAssignedElsewhereIds.forEach((id) => assignedElsewhereIds.add(id));
                         }
 
-                        let selectableMembers = availableMembersForRole.filter(
-                          (m) => !assignedElsewhereIds.has(m.id)
-                        );
+                        let selectableMembers = availableMembersForRole.filter((m) => {
+                          if (assignedElsewhereIds.has(m.id)) return false;
+                          // Exclude members under DA on this service date from new selection
+                          if (m.id !== am.memberId && isMemberUnderDisciplinary(m, serviceDate)) {
+                            return false;
+                          }
+                          return true;
+                        });
 
                         if (am.memberId) {
                           const currentMemberObj = members.find((m) => m.id === am.memberId);
