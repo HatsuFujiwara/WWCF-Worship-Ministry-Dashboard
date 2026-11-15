@@ -1,13 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Member, Schedule, ServiceType, MinistryAssignment, AssignedMember, Song, getAssignmentMembers, isMemberUnderDisciplinary } from '../types';
+import { Member, Schedule, ServiceType, MinistryAssignment, AssignedMember, Song, RehearsalChecklist, LineupTemplate, getAssignmentMembers, isMemberUnderDisciplinary } from '../types';
 import { SongService, MonthlyUsageCheckResult } from '../services/songService';
 import { StorageService } from '../services/storage';
-import { getNextAvailableServiceDate, getSmartInitialServiceDetails, isScheduleEmpty } from '../utils/scheduleUtils';
+import { TemplateService } from '../services/templateService';
+import { AvailabilityService } from '../services/availabilityService';
+import { exportRehearsalSheetAsPDF } from '../services/exportService';
+import { getNextAvailableServiceDate, getSmartInitialServiceDetails, isScheduleEmpty, isNoServiceSchedule } from '../utils/scheduleUtils';
 import { getManilaNowISO, getManilaTodayString, formatDateDisplayManila, getManilaDateParts, isValidServiceDateForType } from '../utils/dateUtils';
 import { sortTags } from '../utils/tagUtils';
 import { triggerHaptic } from '../utils/haptics';
-import { resolveScheduleSongTitles } from '../utils/songResolveUtils';
+import { resolveScheduleSongTitles, resolveSlotSong } from '../utils/songResolveUtils';
+import { calculateLineupDuration } from '../utils/durationUtils';
+import { getSongReferenceLinks, describeKeyTransition, generateServiceBrief, getTransitionPairId, resolveTransitionNote } from '../utils/songReferenceUtils';
+import { hasUsableLyrics } from '../utils/lyricsParser';
+import { CHART_INSTRUMENT_LABELS } from '../utils/chordChartUtils';
+import { buildYouTubeTimestampUrl, formatMarkerTimestamp } from '../utils/videoMarkerUtils';
 import { ImportSummary } from '../services/youtubePlaylistService';
 import { LineupHistoryService, SchedulerSnapshot } from '../services/lineupHistoryService';
 import { SongAutocomplete } from './SongAutocomplete';
@@ -16,6 +24,12 @@ import { SongPickerModal } from './SongPickerModal';
 import { SongFormModal } from './SongFormModal';
 import { SongRecommendationsPanel } from './SongRecommendationsPanel';
 import { SmartSongImportModal } from './SmartSongImportModal';
+import { LineupTemplatesModal } from './LineupTemplatesModal';
+import { MemberAvailabilityModal } from './MemberAvailabilityModal';
+import { TempoDynamicsCurve } from './TempoDynamicsCurve';
+import { RehearsalPrompterModal } from './RehearsalPrompterModal';
+import { LyricsPresentationModal } from './LyricsPresentationModal';
+import { ChordChartViewer } from './ChordChartViewer';
 import { Modal } from './Modal';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import { CustomSelect } from './CustomSelect';
@@ -43,7 +57,25 @@ import {
   X,
   AlertTriangle,
   Undo2,
-  Redo2
+  Redo2,
+  Clock,
+  ExternalLink,
+  Copy,
+  Check,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  Shuffle,
+  LayoutTemplate,
+  UserCheck,
+  Activity,
+  Tv,
+  Monitor,
+  Printer,
+  Ban,
+  BookOpen,
+  Guitar,
+  Edit2
 } from 'lucide-react';
 
 interface LineupConflictModalProps {
@@ -276,7 +308,7 @@ interface SchedulerViewProps {
   allSongs: Song[];
   schedules: Schedule[];
   editingSchedule: Schedule | null;
-  onSaveSchedule: (scheduleData: Omit<Schedule, 'id' | 'updatedAt'>, id?: string) => void;
+  onSaveSchedule: (scheduleData: Omit<Schedule, 'id' | 'updatedAt'>, id?: string) => boolean | void;
   onExportPDF: (schedule: Schedule) => void;
   onExportPNG: (schedule: Schedule) => void;
   onResetForm: () => void;
@@ -375,6 +407,119 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   const [worshipSongs, setWorshipSongs] = useState<string[]>(['']);
   const [praiseSongKeys, setPraiseSongKeys] = useState<string[]>(['']);
   const [worshipSongKeys, setWorshipSongKeys] = useState<string[]>(['']);
+  const [praiseSongIds, setPraiseSongIds] = useState<(string | undefined)[]>([undefined]);
+  const [worshipSongIds, setWorshipSongIds] = useState<(string | undefined)[]>([undefined]);
+
+  // Service Notes & Instructions State (S-00)
+  const [serviceNotes, setServiceNotes] = useState<string>(() => editingSchedule?.notes || '');
+
+  // Explicit No Service State (NS-01)
+  const [noService, setNoService] = useState<boolean>(() => Boolean(editingSchedule?.noService === true));
+  const [noServiceReason, setNoServiceReason] = useState<string>(() =>
+    editingSchedule?.noService === true ? (editingSchedule?.noServiceReason || '') : ''
+  );
+  const [isConfirmNoServiceOpen, setIsConfirmNoServiceOpen] = useState<boolean>(false);
+
+  // Consecutive Song Transitions State (S-04)
+  const [transitionNotes, setTransitionNotes] = useState<Record<string, string>>(() => editingSchedule?.transitionNotes || {});
+  const [isTransitionsOpen, setIsTransitionsOpen] = useState<boolean>(true);
+
+  // Rehearsal Readiness Checklist State (S-06)
+  const getDefaultRehearsalChecklist = useCallback((): RehearsalChecklist => ({
+    songSelectionFinalized: false,
+    performedKeysChecked: false,
+    lyricsReviewed: false,
+    referencesChecked: false,
+    teamAssignmentsFinalized: false,
+    transitionsPrepared: false
+  }), []);
+  const [rehearsalChecklist, setRehearsalChecklist] = useState<RehearsalChecklist>(() =>
+    editingSchedule?.rehearsalChecklist || {
+      songSelectionFinalized: false,
+      performedKeysChecked: false,
+      lyricsReviewed: false,
+      referencesChecked: false,
+      teamAssignmentsFinalized: false,
+      transitionsPrepared: false
+    }
+  );
+  const [isChecklistOpen, setIsChecklistOpen] = useState<boolean>(false);
+
+  // Checklist invalidation helpers (S-06)
+  const invalidateChecklist = useCallback((flags: Partial<Record<keyof Omit<RehearsalChecklist, 'updatedAt'>, boolean>>) => {
+    setRehearsalChecklist((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(flags)) {
+        const key = k as keyof Omit<RehearsalChecklist, 'updatedAt'>;
+        if (next[key] !== v) {
+          next[key] = v as boolean;
+          changed = true;
+        }
+      }
+      if (changed) {
+        next.updatedAt = getManilaNowISO();
+        return next;
+      }
+      return prev;
+    });
+  }, []);
+
+  const invalidateSongChanges = useCallback(() => {
+    invalidateChecklist({
+      songSelectionFinalized: false,
+      performedKeysChecked: false,
+      lyricsReviewed: false,
+      referencesChecked: false,
+      transitionsPrepared: false
+    });
+  }, [invalidateChecklist]);
+
+  const invalidateKeyChanges = useCallback(() => {
+    invalidateChecklist({
+      performedKeysChecked: false,
+      transitionsPrepared: false
+    });
+  }, [invalidateChecklist]);
+
+  const invalidateTeamChanges = useCallback(() => {
+    invalidateChecklist({
+      teamAssignmentsFinalized: false
+    });
+  }, [invalidateChecklist]);
+
+  const invalidateTransitionCueChanges = useCallback(() => {
+    invalidateChecklist({
+      transitionsPrepared: false
+    });
+  }, [invalidateChecklist]);
+
+  // Listen for catalog song lyrics edits so live scheduler marks only lyricsReviewed as pending without losing unsaved edits
+  useEffect(() => {
+    const handleSongLyricsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { songId?: string; title?: string } | undefined;
+      if (!detail) return;
+      const targetId = (detail.songId || '').trim();
+      const targetTitle = (detail.title || '').trim().toLowerCase();
+      const matchesLineup =
+        (targetId && (praiseSongIds.includes(targetId) || worshipSongIds.includes(targetId))) ||
+        (!targetId &&
+          targetTitle &&
+          (praiseSongs.some((t, idx) => !praiseSongIds[idx] && t.trim().toLowerCase() === targetTitle) ||
+            worshipSongs.some((t, idx) => !worshipSongIds[idx] && t.trim().toLowerCase() === targetTitle)));
+      if (matchesLineup) {
+        invalidateChecklist({ lyricsReviewed: false });
+      }
+    };
+    window.addEventListener('wwcf:song-lyrics-updated', handleSongLyricsUpdated);
+    return () => {
+      window.removeEventListener('wwcf:song-lyrics-updated', handleSongLyricsUpdated);
+    };
+  }, [praiseSongIds, worshipSongIds, praiseSongs, worshipSongs, invalidateChecklist]);
+
+  // Service Brief modal/copy state (S-05)
+  const [copiedBrief, setCopiedBrief] = useState<boolean>(false);
+  const [briefModalText, setBriefModalText] = useState<string | null>(null);
 
   // Modals state
   const [monthlyWarnings, setMonthlyWarnings] = useState<MonthlyUsageCheckResult[]>([]);
@@ -404,8 +549,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     songIndex: number;
   }>({ isOpen: false, category: 'praise', songIndex: 0 });
 
-  // Song Form Modal State (Add New Song)
+  // Song Form Modal State (Add New Song / Quick Edit Catalog Lyrics) & Direct Lineup Chart Preview
   const [isSongFormOpen, setIsSongFormOpen] = useState(false);
+  const [editingSongForLyrics, setEditingSongForLyrics] = useState<Song | null>(null);
+  const [chartPreviewTarget, setChartPreviewTarget] = useState<{
+    song: Song;
+    performedKey?: string;
+    sectionLabel: string;
+  } | null>(null);
 
   // Ministry Rows State
   const [ministryRows, setMinistryRows] = useState<MinistryAssignment[]>(() => {
@@ -433,6 +584,13 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   // Duplicate schedule conflict modal state
   const [duplicateConflictSchedule, setDuplicateConflictSchedule] = useState<Schedule | null>(null);
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState<boolean>(false);
+
+  // Roadmap Program Modals: L-01 (Templates), L-02 (Availability), L-07 (Rehearsal Sheet), L-09 (Prompter)
+  const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState<boolean>(false);
+  const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState<boolean>(false);
+  const [isPrompterOpen, setIsPrompterOpen] = useState<boolean>(false);
+  const [isLyricsPresentationOpen, setIsLyricsPresentationOpen] = useState<boolean>(false);
+  const [isExportingRehearsalSheet, setIsExportingRehearsalSheet] = useState<boolean>(false);
 
   // Smart Role Filter Toggle (Persisted across tab switches)
   const [isSmartFilter, setIsSmartFilter] = useState<boolean>(() =>
@@ -474,10 +632,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       worshipSongs: [...worshipSongs],
       praiseSongKeys: [...praiseSongKeys],
       worshipSongKeys: [...worshipSongKeys],
-      ministryRows: JSON.parse(JSON.stringify(ministryRows))
+      praiseSongIds: [...praiseSongIds],
+      worshipSongIds: [...worshipSongIds],
+      ministryRows: JSON.parse(JSON.stringify(ministryRows)),
+      notes: serviceNotes,
+      noService,
+      noServiceReason,
+      transitionNotes: { ...transitionNotes },
+      rehearsalChecklist: { ...rehearsalChecklist },
+      editingScheduleId: editingSchedule?.id || null
     }));
     return unregister;
-  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, ministryRows]);
+  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, editingSchedule]);
 
   // Listen for restore-scheduler-snapshot custom events triggered by unified undo/redo
   useEffect(() => {
@@ -492,7 +658,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       setWorshipSongs([...s.worshipSongs]);
       setPraiseSongKeys([...s.praiseSongKeys]);
       setWorshipSongKeys([...s.worshipSongKeys]);
+      setPraiseSongIds(s.praiseSongIds ? [...s.praiseSongIds] : s.praiseSongs.map(() => undefined));
+      setWorshipSongIds(s.worshipSongIds ? [...s.worshipSongIds] : s.worshipSongs.map(() => undefined));
       setMinistryRows(JSON.parse(JSON.stringify(s.ministryRows || [])));
+      setServiceNotes(s.notes || '');
+      setNoService(Boolean(s.noService === true));
+      setNoServiceReason(s.noServiceReason || '');
+      setTransitionNotes(s.transitionNotes || {});
+      setRehearsalChecklist(s.rehearsalChecklist || getDefaultRehearsalChecklist());
       triggerHaptic('selection');
       setTimeout(() => {
         isRestoringHistoryRef.current = false;
@@ -503,7 +676,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     return () => {
       window.removeEventListener('wwcf:restore-scheduler-snapshot', handleRestore);
     };
-  }, []);
+  }, [getDefaultRehearsalChecklist]);
 
   const takeSnapshot = useCallback((isDiscrete = true) => {
     if (isRestoringHistoryRef.current || isResettingRef.current) return;
@@ -521,10 +694,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       worshipSongs: [...worshipSongs],
       praiseSongKeys: [...praiseSongKeys],
       worshipSongKeys: [...worshipSongKeys],
-      ministryRows: JSON.parse(JSON.stringify(ministryRows))
+      praiseSongIds: [...praiseSongIds],
+      worshipSongIds: [...worshipSongIds],
+      ministryRows: JSON.parse(JSON.stringify(ministryRows)),
+      notes: serviceNotes,
+      noService,
+      noServiceReason,
+      transitionNotes: { ...transitionNotes },
+      rehearsalChecklist: { ...rehearsalChecklist },
+      editingScheduleId: editingSchedule?.id || null
     };
     LineupHistoryService.pushSnapshot(currentContextKey, snap);
-  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, ministryRows]);
+  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, editingSchedule]);
 
   const handleUndo = useCallback(async () => {
     if (!LineupHistoryService.canUndo()) return;
@@ -536,7 +717,15 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         worshipSongs: [...worshipSongs],
         praiseSongKeys: [...praiseSongKeys],
         worshipSongKeys: [...worshipSongKeys],
-        ministryRows: JSON.parse(JSON.stringify(ministryRows))
+        praiseSongIds: [...praiseSongIds],
+        worshipSongIds: [...worshipSongIds],
+        ministryRows: JSON.parse(JSON.stringify(ministryRows)),
+        notes: serviceNotes,
+        noService,
+        noServiceReason,
+        transitionNotes: { ...transitionNotes },
+        rehearsalChecklist: { ...rehearsalChecklist },
+        editingScheduleId: editingSchedule?.id || null
       };
       const res = await LineupHistoryService.undo(currentContextKey, currentSnap);
       triggerHaptic('selection');
@@ -549,7 +738,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       console.error('Failed to undo in scheduler:', err);
       showToast('Failed to undo last action.', 'danger');
     }
-  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, ministryRows, showToast]);
+  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, editingSchedule, showToast]);
 
   const handleRedo = useCallback(async () => {
     if (!LineupHistoryService.canRedo()) return;
@@ -561,7 +750,15 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         worshipSongs: [...worshipSongs],
         praiseSongKeys: [...praiseSongKeys],
         worshipSongKeys: [...worshipSongKeys],
-        ministryRows: JSON.parse(JSON.stringify(ministryRows))
+        praiseSongIds: [...praiseSongIds],
+        worshipSongIds: [...worshipSongIds],
+        ministryRows: JSON.parse(JSON.stringify(ministryRows)),
+        notes: serviceNotes,
+        noService,
+        noServiceReason,
+        transitionNotes: { ...transitionNotes },
+        rehearsalChecklist: { ...rehearsalChecklist },
+        editingScheduleId: editingSchedule?.id || null
       };
       const res = await LineupHistoryService.redo(currentContextKey, currentSnap);
       triggerHaptic('selection');
@@ -574,7 +771,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       console.error('Failed to redo in scheduler:', err);
       showToast('Failed to redo last action.', 'danger');
     }
-  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, ministryRows, showToast]);
+  }, [currentContextKey, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, editingSchedule, showToast]);
 
   // Full reset handler for Reset Form action
   const handlePerformFullReset = useCallback(() => {
@@ -587,7 +784,15 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     setWorshipSongs(['']);
     setPraiseSongKeys(['']);
     setWorshipSongKeys(['']);
+    setPraiseSongIds([undefined]);
+    setWorshipSongIds([undefined]);
     setMinistryRows(createDefaultMinistryRows());
+    setServiceNotes('');
+    setNoService(false);
+    setNoServiceReason('');
+    setIsConfirmNoServiceOpen(false);
+    setTransitionNotes({});
+    setRehearsalChecklist(getDefaultRehearsalChecklist());
     setPendingDaAssignment(null);
     setSmartImportConfig({ isOpen: false });
     setPendingImportData(null);
@@ -596,11 +801,15 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     LineupHistoryService.clearHistory(currentContextKey);
     setCanUndo(false);
     setCanRedo(false);
-    StorageService.saveDraftSchedule(null);
+    try {
+      StorageService.saveDraftScheduleChecked(null);
+    } catch (e) {
+      console.warn('[SchedulerView] Failed to clear draft on reset:', e);
+    }
     setTimeout(() => {
       isResettingRef.current = false;
     }, 100);
-  }, [schedules, currentContextKey]);
+  }, [schedules, currentContextKey, getDefaultRehearsalChecklist]);
 
   useEffect(() => {
     const onResetEvent = () => {
@@ -635,6 +844,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           setWorshipSongs(draft.worshipSongs !== undefined ? draft.worshipSongs : (editingSchedule.worshipSongs || []));
           setPraiseSongKeys(draft.praiseSongKeys !== undefined ? draft.praiseSongKeys : (editingSchedule.praiseSongKeys || []));
           setWorshipSongKeys(draft.worshipSongKeys !== undefined ? draft.worshipSongKeys : (editingSchedule.worshipSongKeys || []));
+          setPraiseSongIds(draft.praiseSongIds !== undefined ? draft.praiseSongIds : (editingSchedule.praiseSongIds || editingSchedule.praiseSongs?.map(() => undefined) || [undefined]));
+          setWorshipSongIds(draft.worshipSongIds !== undefined ? draft.worshipSongIds : (editingSchedule.worshipSongIds || editingSchedule.worshipSongs?.map(() => undefined) || [undefined]));
+          setServiceNotes(draft.notes !== undefined ? draft.notes : (editingSchedule.notes || ''));
+          const draftNoSvc = draft.noService !== undefined ? Boolean(draft.noService === true) : Boolean(editingSchedule.noService === true);
+          setNoService(draftNoSvc);
+          setNoServiceReason(
+            draftNoSvc
+              ? (draft.noServiceReason !== undefined ? draft.noServiceReason : (editingSchedule.noServiceReason || ''))
+              : ''
+          );
+          setTransitionNotes(draft.transitionNotes || editingSchedule.transitionNotes || {});
+          setRehearsalChecklist(draft.rehearsalChecklist || editingSchedule.rehearsalChecklist || getDefaultRehearsalChecklist());
           setMinistryRows(
             syncMinistryRowsForSongLeaders(
               draft.ministryAssignments?.length
@@ -652,23 +873,33 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           setServiceDate(editingSchedule.serviceDate);
           setIsDateManuallyEdited(true);
 
+          const isNoSvc = Boolean(editingSchedule.noService === true);
+          setNoService(isNoSvc);
+          setNoServiceReason(isNoSvc ? (editingSchedule.noServiceReason || '') : '');
+
           const resolved = resolveScheduleSongTitles(editingSchedule, allSongs);
-          setPraiseSongs(resolved.praiseSongs || []);
-          setWorshipSongs(resolved.worshipSongs || []);
+          setPraiseSongs(resolved.praiseSongs?.length ? resolved.praiseSongs : ['']);
+          setWorshipSongs(resolved.worshipSongs?.length ? resolved.worshipSongs : ['']);
 
-          const pKeys = (resolved.praiseSongs || []).map((s, idx) => {
-            if (editingSchedule.praiseSongKeys?.[idx] !== undefined) return editingSchedule.praiseSongKeys[idx];
-            const found = allSongs.find(x => x.title.toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-            return found?.originalKey || found?.key || '';
-          });
-          setPraiseSongKeys(pKeys);
+          const pKeys = (resolved.praiseSongs || []).map((_, idx) =>
+            editingSchedule.praiseSongKeys?.[idx] !== undefined ? editingSchedule.praiseSongKeys[idx] : ''
+          );
+          setPraiseSongKeys(pKeys.length > 0 ? pKeys : ['']);
 
-          const wKeys = (resolved.worshipSongs || []).map((s, idx) => {
-            if (editingSchedule.worshipSongKeys?.[idx] !== undefined) return editingSchedule.worshipSongKeys[idx];
-            const found = allSongs.find(x => x.title.toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-            return found?.originalKey || found?.key || '';
-          });
-          setWorshipSongKeys(wKeys);
+          const wKeys = (resolved.worshipSongs || []).map((_, idx) =>
+            editingSchedule.worshipSongKeys?.[idx] !== undefined ? editingSchedule.worshipSongKeys[idx] : ''
+          );
+          setWorshipSongKeys(wKeys.length > 0 ? wKeys : ['']);
+
+          const resolvedPraiseIds = (resolved.praiseSongIds || []).map((id) => (id ? id : undefined));
+          setPraiseSongIds(resolvedPraiseIds.length > 0 ? resolvedPraiseIds : [undefined]);
+
+          const resolvedWorshipIds = (resolved.worshipSongIds || []).map((id) => (id ? id : undefined));
+          setWorshipSongIds(resolvedWorshipIds.length > 0 ? resolvedWorshipIds : [undefined]);
+
+          setServiceNotes(editingSchedule.notes || '');
+          setTransitionNotes(editingSchedule.transitionNotes || {});
+          setRehearsalChecklist(editingSchedule.rehearsalChecklist || getDefaultRehearsalChecklist());
 
           setMinistryRows(
             syncMinistryRowsForSongLeaders(
@@ -693,6 +924,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           setWorshipSongs(draft.worshipSongs?.length ? draft.worshipSongs : ['']);
           setPraiseSongKeys(draft.praiseSongKeys?.length ? draft.praiseSongKeys : ['']);
           setWorshipSongKeys(draft.worshipSongKeys?.length ? draft.worshipSongKeys : ['']);
+          setPraiseSongIds(draft.praiseSongIds?.length ? draft.praiseSongIds : (draft.praiseSongs?.map(() => undefined) || [undefined]));
+          setWorshipSongIds(draft.worshipSongIds?.length ? draft.worshipSongIds : (draft.worshipSongs?.map(() => undefined) || [undefined]));
+          setServiceNotes(draft.notes || '');
+          const draftNoSvc = Boolean(draft.noService === true);
+          setNoService(draftNoSvc);
+          setNoServiceReason(draftNoSvc ? (draft.noServiceReason || '') : '');
+          setTransitionNotes(draft.transitionNotes || {});
+          setRehearsalChecklist(draft.rehearsalChecklist || getDefaultRehearsalChecklist());
           setMinistryRows(
             syncMinistryRowsForSongLeaders(
               draft.ministryAssignments?.length
@@ -714,37 +953,60 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           setWorshipSongs(['']);
           setPraiseSongKeys(['']);
           setWorshipSongKeys(['']);
+          setPraiseSongIds([undefined]);
+          setWorshipSongIds([undefined]);
+          setServiceNotes('');
+          setNoService(false);
+          setNoServiceReason('');
+          setTransitionNotes({});
+          setRehearsalChecklist(getDefaultRehearsalChecklist());
           setMinistryRows(createDefaultMinistryRows());
         }
       }
     }
-  }, [editingSchedule]);
+  }, [editingSchedule, getDefaultRehearsalChecklist]);
 
   // Autosave active draft schedule as changes occur
   useEffect(() => {
     if (isResettingRef.current) return;
 
     const hasSongs = praiseSongs.some((s) => s.trim() !== '') || worshipSongs.some((s) => s.trim() !== '');
-    const hasAssignments = ministryRows.some((r) => r.assignedMembers.length > 0);
+    const hasAssignments = ministryRows.some((r) =>
+      getAssignmentMembers(r).some((m) => Boolean(m.memberId) || Boolean(m.memberName?.trim()))
+    );
+    const hasNotes = serviceNotes.trim() !== '';
+    const hasNoSvc = noService;
 
-    if (hasSongs || hasAssignments || editingSchedule) {
+    if (hasSongs || hasAssignments || hasNotes || hasNoSvc || editingSchedule) {
       const timer = setTimeout(() => {
-        StorageService.saveDraftSchedule({
-          editingScheduleId: editingSchedule?.id || null,
-          serviceType,
-          serviceDate,
-          praiseSongs,
-          worshipSongs,
-          praiseSongKeys,
-          worshipSongKeys,
-          ministryAssignments: ministryRows.map((r) => ({
-            id: r.id || `ma_${r.role}`,
-            role: r.role,
-            assignedMembers: r.assignedMembers,
-            notes: r.notes
-          })),
-          savedAt: new Date().toISOString()
-        });
+        try {
+          StorageService.saveDraftScheduleChecked({
+            editingScheduleId: editingSchedule?.id || null,
+            serviceType,
+            serviceDate,
+            praiseSongs,
+            worshipSongs,
+            praiseSongKeys,
+            worshipSongKeys,
+            praiseSongIds,
+            worshipSongIds,
+            ministryAssignments: ministryRows.map((r) => ({
+              id: r.id || `ma_${r.role}`,
+              role: r.role,
+              assignedMembers: r.assignedMembers,
+              notes: r.notes
+            })),
+            notes: serviceNotes,
+            noService,
+            noServiceReason: noService ? (noServiceReason.trim() || undefined) : undefined,
+            transitionNotes,
+            rehearsalChecklist,
+            savedAt: new Date().toISOString()
+          });
+        } catch (err) {
+          console.error('[SchedulerView] Draft autosave failed:', err);
+          showToast('Could not autosave lineup draft. Browser storage may be full.', 'danger');
+        }
       }, 400);
 
       return () => clearTimeout(timer);
@@ -756,7 +1018,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     worshipSongs,
     praiseSongKeys,
     worshipSongKeys,
+    praiseSongIds,
+    worshipSongIds,
     ministryRows,
+    serviceNotes,
+    noService,
+    noServiceReason,
+    transitionNotes,
+    rehearsalChecklist,
     editingSchedule
   ]);
 
@@ -764,8 +1033,10 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       const hasUnsavedSongs = praiseSongs.some((s) => s.trim() !== '') || worshipSongs.some((s) => s.trim() !== '');
-      const hasUnsavedAssignments = ministryRows.some((r) => r.assignedMembers.length > 0);
-      if (hasUnsavedSongs || hasUnsavedAssignments) {
+      const hasUnsavedAssignments = ministryRows.some((r) =>
+        getAssignmentMembers(r).some((m) => Boolean(m.memberId) || Boolean(m.memberName?.trim()))
+      );
+      if (hasUnsavedSongs || hasUnsavedAssignments || noService) {
         e.preventDefault();
         e.returnValue = '';
         return '';
@@ -776,7 +1047,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [praiseSongs, worshipSongs, ministryRows]);
+  }, [praiseSongs, worshipSongs, ministryRows, noService, noServiceReason]);
 
   // Helper to load a schedule object into editor state
   const loadScheduleDataIntoEditor = (sched: Schedule) => {
@@ -785,25 +1056,36 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     setCanUndo(false);
     setCanRedo(false);
 
+    const isNoSvc = Boolean(sched.noService === true);
+    setNoService(isNoSvc);
+    setNoServiceReason(isNoSvc ? (sched.noServiceReason || '') : '');
+    setChartPreviewTarget(null);
+
     setServiceType(sched.serviceType);
     setServiceDate(sched.serviceDate);
     const resolved = resolveScheduleSongTitles(sched, allSongs);
-    setPraiseSongs(resolved.praiseSongs || []);
-    setWorshipSongs(resolved.worshipSongs || []);
+    setPraiseSongs(resolved.praiseSongs?.length ? resolved.praiseSongs : ['']);
+    setWorshipSongs(resolved.worshipSongs?.length ? resolved.worshipSongs : ['']);
 
-    const pKeys = (resolved.praiseSongs || []).map((s, idx) => {
-      if (sched.praiseSongKeys?.[idx] !== undefined) return sched.praiseSongKeys[idx];
-      const found = allSongs.find(x => x.title.toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-      return found?.originalKey || found?.key || '';
-    });
-    setPraiseSongKeys(pKeys);
+    const pKeys = (resolved.praiseSongs || []).map((_, idx) =>
+      sched.praiseSongKeys?.[idx] !== undefined ? sched.praiseSongKeys[idx] : ''
+    );
+    setPraiseSongKeys(pKeys.length > 0 ? pKeys : ['']);
 
-    const wKeys = (resolved.worshipSongs || []).map((s, idx) => {
-      if (sched.worshipSongKeys?.[idx] !== undefined) return sched.worshipSongKeys[idx];
-      const found = allSongs.find(x => x.title.toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-      return found?.originalKey || found?.key || '';
-    });
-    setWorshipSongKeys(wKeys);
+    const wKeys = (resolved.worshipSongs || []).map((_, idx) =>
+      sched.worshipSongKeys?.[idx] !== undefined ? sched.worshipSongKeys[idx] : ''
+    );
+    setWorshipSongKeys(wKeys.length > 0 ? wKeys : ['']);
+
+    const resolvedPraiseIds = (resolved.praiseSongIds || []).map((id) => (id ? id : undefined));
+    setPraiseSongIds(resolvedPraiseIds.length > 0 ? resolvedPraiseIds : [undefined]);
+
+    const resolvedWorshipIds = (resolved.worshipSongIds || []).map((id) => (id ? id : undefined));
+    setWorshipSongIds(resolvedWorshipIds.length > 0 ? resolvedWorshipIds : [undefined]);
+
+    setServiceNotes(sched.notes || '');
+    setTransitionNotes(sched.transitionNotes || {});
+    setRehearsalChecklist(sched.rehearsalChecklist || getDefaultRehearsalChecklist());
 
     setMinistryRows(
       syncMinistryRowsForSongLeaders(
@@ -884,6 +1166,54 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     );
   };
 
+  const hasExistingDraftContent = useCallback((): boolean => {
+    const hasSongs =
+      praiseSongs.some((s) => Boolean(s && s.trim())) ||
+      worshipSongs.some((s) => Boolean(s && s.trim()));
+    if (hasSongs) return true;
+
+    const hasAssignments = ministryRows.some((r) =>
+      getAssignmentMembers(r).some((m) => Boolean(m.memberId) || Boolean(m.memberName && m.memberName.trim()))
+    );
+    if (hasAssignments) return true;
+
+    const hasTransitionNotes = Object.values(transitionNotes || {}).some((val) => Boolean(val && val.trim()));
+    return hasTransitionNotes;
+  }, [praiseSongs, worshipSongs, ministryRows, transitionNotes]);
+
+  const applyNoServiceEnabled = useCallback(() => {
+    takeSnapshot(true);
+    setNoService(true);
+    setPraiseSongs(['']);
+    setWorshipSongs(['']);
+    setPraiseSongKeys(['']);
+    setWorshipSongKeys(['']);
+    setPraiseSongIds([undefined]);
+    setWorshipSongIds([undefined]);
+    setMinistryRows(createDefaultMinistryRows());
+    setTransitionNotes({});
+    setRehearsalChecklist(getDefaultRehearsalChecklist());
+    setChartPreviewTarget(null);
+    setIsConfirmNoServiceOpen(false);
+    triggerHaptic('selection');
+  }, [takeSnapshot, getDefaultRehearsalChecklist]);
+
+  const handleToggleNoService = useCallback((nextVal: boolean) => {
+    if (nextVal === noService) return;
+    if (nextVal) {
+      if (hasExistingDraftContent()) {
+        setIsConfirmNoServiceOpen(true);
+      } else {
+        applyNoServiceEnabled();
+      }
+    } else {
+      takeSnapshot(true);
+      setNoService(false);
+      setNoServiceReason('');
+      triggerHaptic('selection');
+    }
+  }, [noService, hasExistingDraftContent, applyNoServiceEnabled, takeSnapshot]);
+
   // Auto-save draft trigger on any changes to scheduler state
   useEffect(() => {
     if (isResettingRef.current) return;
@@ -896,7 +1226,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       worshipSongs,
       praiseSongKeys,
       worshipSongKeys,
-      ministryAssignments: ministryRows
+      praiseSongIds,
+      worshipSongIds,
+      ministryAssignments: ministryRows,
+      notes: serviceNotes,
+      noService,
+      noServiceReason: noService ? (noServiceReason.trim() || undefined) : undefined,
+      transitionNotes,
+      rehearsalChecklist
     };
     onTriggerDraft(draft);
 
@@ -906,7 +1243,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         detail: { praiseSongs, worshipSongs }
       })
     );
-  }, [serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, ministryRows, editingSchedule]);
+  }, [serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, editingSchedule, onTriggerDraft]);
 
   // Listen for request-lineup-songs and request-service-details from Interactive Guide
   useEffect(() => {
@@ -941,18 +1278,39 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   }, [praiseSongs, worshipSongs, serviceType, serviceDate]);
 
   // Song input handlers
-  const handlePraiseChange = (index: number, value: string) => {
+  const handlePraiseChange = (index: number, value: string, selectedSong?: Song) => {
     takeSnapshot(false);
     const updated = [...praiseSongs];
     updated[index] = value;
     setPraiseSongs(updated);
 
-    const matchedSong = allSongs.find(s => s.title.toLowerCase() === value.trim().toLowerCase());
     const updatedKeys = [...praiseSongKeys];
-    if (matchedSong) {
-      updatedKeys[index] = matchedSong.originalKey || matchedSong.key || '';
+    const updatedIds = [...praiseSongIds];
+
+    if (selectedSong) {
+      updatedIds[index] = selectedSong.id;
+      updatedKeys[index] = selectedSong.originalKey || selectedSong.key || '';
+    } else {
+      const clean = value.trim().toLowerCase();
+      if (!clean) {
+        updatedIds[index] = undefined;
+        updatedKeys[index] = '';
+      } else {
+        const matches = allSongs.filter(s => s.title.trim().toLowerCase() === clean);
+        if (matches.length === 1) {
+          updatedIds[index] = matches[0].id;
+          if (!updatedKeys[index]) {
+            updatedKeys[index] = matches[0].originalKey || matches[0].key || '';
+          }
+        } else {
+          updatedIds[index] = undefined;
+        }
+      }
     }
+
     setPraiseSongKeys(updatedKeys);
+    setPraiseSongIds(updatedIds);
+    invalidateSongChanges();
   };
 
   const handlePraiseKeyChange = (index: number, keyVal: string) => {
@@ -960,32 +1318,58 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     const updatedKeys = [...praiseSongKeys];
     updatedKeys[index] = keyVal;
     setPraiseSongKeys(updatedKeys);
+    invalidateKeyChanges();
   };
 
   const addPraiseSong = () => {
     takeSnapshot(true);
     setPraiseSongs([...praiseSongs, '']);
     setPraiseSongKeys([...praiseSongKeys, '']);
+    setPraiseSongIds([...praiseSongIds, undefined]);
+    invalidateSongChanges();
   };
 
   const removePraiseSong = (index: number) => {
     takeSnapshot(true);
     setPraiseSongs(praiseSongs.filter((_, i) => i !== index));
     setPraiseSongKeys(praiseSongKeys.filter((_, i) => i !== index));
+    setPraiseSongIds(praiseSongIds.filter((_, i) => i !== index));
+    invalidateSongChanges();
   };
 
-  const handleWorshipChange = (index: number, value: string) => {
+  const handleWorshipChange = (index: number, value: string, selectedSong?: Song) => {
     takeSnapshot(false);
     const updated = [...worshipSongs];
     updated[index] = value;
     setWorshipSongs(updated);
 
-    const matchedSong = allSongs.find(s => s.title.toLowerCase() === value.trim().toLowerCase());
     const updatedKeys = [...worshipSongKeys];
-    if (matchedSong) {
-      updatedKeys[index] = matchedSong.originalKey || matchedSong.key || '';
+    const updatedIds = [...worshipSongIds];
+
+    if (selectedSong) {
+      updatedIds[index] = selectedSong.id;
+      updatedKeys[index] = selectedSong.originalKey || selectedSong.key || '';
+    } else {
+      const clean = value.trim().toLowerCase();
+      if (!clean) {
+        updatedIds[index] = undefined;
+        updatedKeys[index] = '';
+      } else {
+        const matches = allSongs.filter(s => s.title.trim().toLowerCase() === clean);
+        if (matches.length === 1) {
+          updatedIds[index] = matches[0].id;
+          if (!updatedKeys[index]) {
+            updatedKeys[index] = matches[0].originalKey || matches[0].key || '';
+          }
+        } else {
+          updatedIds[index] = undefined;
+        }
+      }
     }
+
     setWorshipSongKeys(updatedKeys);
+    setWorshipSongIds(updatedIds);
+    invalidateSongChanges();
   };
 
   const handleWorshipKeyChange = (index: number, keyVal: string) => {
@@ -993,70 +1377,94 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     const updatedKeys = [...worshipSongKeys];
     updatedKeys[index] = keyVal;
     setWorshipSongKeys(updatedKeys);
+    invalidateKeyChanges();
   };
 
   const addWorshipSong = () => {
     takeSnapshot(true);
     setWorshipSongs([...worshipSongs, '']);
     setWorshipSongKeys([...worshipSongKeys, '']);
+    setWorshipSongIds([...worshipSongIds, undefined]);
+    invalidateSongChanges();
   };
 
   const removeWorshipSong = (index: number) => {
     takeSnapshot(true);
     setWorshipSongs(worshipSongs.filter((_, i) => i !== index));
     setWorshipSongKeys(worshipSongKeys.filter((_, i) => i !== index));
+    setWorshipSongIds(worshipSongIds.filter((_, i) => i !== index));
+    invalidateSongChanges();
   };
 
   // Handler for adding recommended songs directly into current lineup
   const handleAddRecommendedSong = (category: 'praise' | 'worship', songTitle: string, defaultKey?: string) => {
     takeSnapshot(true);
+    const matched = resolveSlotSong(songTitle, undefined, allSongs).song;
+    const songId = matched?.id;
     if (category === 'praise') {
       if (praiseSongs.length === 1 && praiseSongs[0].trim() === '') {
         setPraiseSongs([songTitle]);
         setPraiseSongKeys([defaultKey || '']);
+        setPraiseSongIds([songId]);
       } else {
         setPraiseSongs([...praiseSongs, songTitle]);
         setPraiseSongKeys([...praiseSongKeys, defaultKey || '']);
+        setPraiseSongIds([...praiseSongIds, songId]);
       }
       showToast(`Added "${songTitle}" to Praise songs`, 'success');
     } else {
       if (worshipSongs.length === 1 && worshipSongs[0].trim() === '') {
         setWorshipSongs([songTitle]);
         setWorshipSongKeys([defaultKey || '']);
+        setWorshipSongIds([songId]);
       } else {
         setWorshipSongs([...worshipSongs, songTitle]);
         setWorshipSongKeys([...worshipSongKeys, defaultKey || '']);
+        setWorshipSongIds([...worshipSongIds, songId]);
       }
       showToast(`Added "${songTitle}" to Worship songs`, 'success');
     }
+    invalidateSongChanges();
   };
 
-  // Helper to sync category changes to database based on lineup position
-  const syncCategoriesForLineup = async (praiseList: string[], worshipList: string[]) => {
-    const praiseTitles = praiseList.map((s) => s.trim().toLowerCase()).filter(Boolean);
-    const worshipTitles = worshipList.map((s) => s.trim().toLowerCase()).filter(Boolean);
+  // Helper to sync category changes to database based on lineup position (ID-authoritative)
+  const syncCategoriesForLineup = async (
+    praiseList: string[],
+    worshipList: string[],
+    praiseIdsList?: (string | undefined)[],
+    worshipIdsList?: (string | undefined)[]
+  ) => {
+    const hasPraise = praiseList.some((s) => Boolean(s && s.trim()));
+    const hasWorship = worshipList.some((s) => Boolean(s && s.trim()));
 
-    if (praiseTitles.length === 0 && worshipTitles.length === 0) return;
+    if (!hasPraise && !hasWorship) return;
 
     try {
       const songs = await SongService.getSongs();
-      const praiseIds: string[] = [];
-      const worshipIds: string[] = [];
+      const praiseIdsSet = new Set<string>();
+      const worshipIdsSet = new Set<string>();
 
-      songs.forEach((song) => {
-        const titleLower = song.title.trim().toLowerCase();
-        if (praiseTitles.includes(titleLower)) {
-          praiseIds.push(song.id);
-        } else if (worshipTitles.includes(titleLower)) {
-          worshipIds.push(song.id);
+      praiseList.forEach((title, idx) => {
+        if (!title || !title.trim()) return;
+        const resolved = resolveSlotSong(title, praiseIdsList?.[idx], songs);
+        if (resolved.song?.id) {
+          praiseIdsSet.add(resolved.song.id);
         }
       });
 
-      if (praiseIds.length > 0) {
-        await SongService.bulkUpdateCategory(praiseIds, 'praise');
+      worshipList.forEach((title, idx) => {
+        if (!title || !title.trim()) return;
+        const resolved = resolveSlotSong(title, worshipIdsList?.[idx], songs);
+        if (resolved.song?.id && !praiseIdsSet.has(resolved.song.id)) {
+          worshipIdsSet.add(resolved.song.id);
+        }
+      });
+
+      if (praiseIdsSet.size > 0) {
+        await SongService.bulkUpdateCategory(Array.from(praiseIdsSet), 'praise');
       }
-      if (worshipIds.length > 0) {
-        await SongService.bulkUpdateCategory(worshipIds, 'worship');
+      if (worshipIdsSet.size > 0) {
+        await SongService.bulkUpdateCategory(Array.from(worshipIdsSet), 'worship');
       }
     } catch (e) {
       console.warn('Failed to sync song categories:', e);
@@ -1073,8 +1481,10 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     takeSnapshot(true);
     let nextPraise = [...praiseSongs];
     let nextPraiseKeys = [...praiseSongKeys];
+    let nextPraiseIds = [...praiseSongIds];
     let nextWorship = [...worshipSongs];
     let nextWorshipKeys = [...worshipSongKeys];
+    let nextWorshipIds = [...worshipSongIds];
 
     if (source.type === 'lineup') {
       const { category: srcCategory, index: srcIndex } = source;
@@ -1083,10 +1493,12 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         // 1. REORDER WITHIN THE SAME CATEGORY LIST
         const list = targetCategory === 'praise' ? nextPraise : nextWorship;
         const keysList = targetCategory === 'praise' ? nextPraiseKeys : nextWorshipKeys;
+        const idsList = targetCategory === 'praise' ? nextPraiseIds : nextWorshipIds;
 
         if (srcIndex >= 0 && srcIndex < list.length) {
           const [movedSong] = list.splice(srcIndex, 1);
           const [movedKey] = keysList.splice(srcIndex, 1);
+          const [movedId] = idsList.splice(srcIndex, 1);
 
           let finalTargetIndex: number;
           if (targetIndex !== undefined) {
@@ -1101,25 +1513,31 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
 
           list.splice(finalTargetIndex, 0, movedSong);
           keysList.splice(finalTargetIndex, 0, movedKey || '');
+          idsList.splice(finalTargetIndex, 0, movedId);
 
           if (targetCategory === 'praise') {
             setPraiseSongs([...list]);
             setPraiseSongKeys([...keysList]);
+            setPraiseSongIds([...idsList]);
           } else {
             setWorshipSongs([...list]);
             setWorshipSongKeys([...keysList]);
+            setWorshipSongIds([...idsList]);
           }
         }
       } else {
         // 2. CROSS-CATEGORY MOVE (Praise -> Worship or Worship -> Praise)
         const srcList = srcCategory === 'praise' ? nextPraise : nextWorship;
         const srcKeys = srcCategory === 'praise' ? nextPraiseKeys : nextWorshipKeys;
+        const srcIds = srcCategory === 'praise' ? nextPraiseIds : nextWorshipIds;
         const destList = targetCategory === 'praise' ? nextPraise : nextWorship;
         const destKeys = targetCategory === 'praise' ? nextPraiseKeys : nextWorshipKeys;
+        const destIds = targetCategory === 'praise' ? nextPraiseIds : nextWorshipIds;
 
         if (srcIndex >= 0 && srcIndex < srcList.length) {
           const songToMove = srcList[srcIndex];
           const keyToMove = srcKeys[srcIndex] || '';
+          const idToMove = srcIds[srcIndex];
 
           if (!songToMove || songToMove.trim() === '') {
             return;
@@ -1128,11 +1546,13 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           // Remove from source list (can become cleanly empty)
           srcList.splice(srcIndex, 1);
           srcKeys.splice(srcIndex, 1);
+          srcIds.splice(srcIndex, 1);
 
           // Destination list: If destination currently only has 1 song and it's blank '', replace it!
           if (destList.length === 1 && (!destList[0] || destList[0].trim() === '')) {
             destList[0] = songToMove;
             destKeys[0] = keyToMove;
+            destIds[0] = idToMove;
           } else {
             let finalTargetIndex: number;
             if (targetIndex !== undefined) {
@@ -1143,18 +1563,23 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             }
             destList.splice(finalTargetIndex, 0, songToMove);
             destKeys.splice(finalTargetIndex, 0, keyToMove);
+            destIds.splice(finalTargetIndex, 0, idToMove);
           }
 
           if (srcCategory === 'praise') {
             setPraiseSongs([...srcList]);
             setPraiseSongKeys([...srcKeys]);
+            setPraiseSongIds([...srcIds]);
             setWorshipSongs([...destList]);
             setWorshipSongKeys([...destKeys]);
+            setWorshipSongIds([...destIds]);
           } else {
             setWorshipSongs([...srcList]);
             setWorshipSongKeys([...srcKeys]);
+            setWorshipSongIds([...srcIds]);
             setPraiseSongs([...destList]);
             setPraiseSongKeys([...destKeys]);
+            setPraiseSongIds([...destIds]);
           }
 
           const toName = targetCategory === 'praise' ? 'Praise (Fast)' : 'Worship (Slow)';
@@ -1165,10 +1590,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       // 3. DROP RECOMMENDATION INTO LINEUP
       const destList = targetCategory === 'praise' ? nextPraise : nextWorship;
       const destKeys = targetCategory === 'praise' ? nextPraiseKeys : nextWorshipKeys;
+      const destIds = targetCategory === 'praise' ? nextPraiseIds : nextWorshipIds;
+      const recSong = resolveSlotSong(source.songTitle, undefined, allSongs).song;
+      const recId = recSong?.id;
 
       if (destList.length === 1 && (!destList[0] || destList[0].trim() === '')) {
         destList[0] = source.songTitle;
         destKeys[0] = source.key || '';
+        destIds[0] = recId;
       } else {
         let finalTargetIndex: number;
         if (targetIndex !== undefined) {
@@ -1179,19 +1608,24 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         }
         destList.splice(finalTargetIndex, 0, source.songTitle);
         destKeys.splice(finalTargetIndex, 0, source.key || '');
+        destIds.splice(finalTargetIndex, 0, recId);
       }
 
       if (targetCategory === 'praise') {
         setPraiseSongs([...destList]);
         setPraiseSongKeys([...destKeys]);
+        setPraiseSongIds([...destIds]);
       } else {
         setWorshipSongs([...destList]);
         setWorshipSongKeys([...destKeys]);
+        setWorshipSongIds([...destIds]);
       }
 
       const toName = targetCategory === 'praise' ? 'Praise' : 'Worship';
       showToast(`Added "${source.songTitle}" to ${toName} songs`, 'success');
     }
+
+    invalidateSongChanges();
   };
 
   // Reordering & Category Swap button / select handlers
@@ -1410,13 +1844,20 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     const newPraise = praiseTitles.length > 0 ? praiseTitles : [''];
     const newWorship = worshipTitles.length > 0 ? worshipTitles : [''];
 
+    const praiseIds = praiseImported.map((s) => s.id);
+    const worshipIds = worshipImported.map((s) => s.id);
+
     setPraiseSongs(newPraise);
     setWorshipSongs(newWorship);
 
     setPraiseSongKeys(praiseKeys.length > 0 ? praiseKeys : ['']);
     setWorshipSongKeys(worshipKeys.length > 0 ? worshipKeys : ['']);
 
-    await syncCategoriesForLineup(newPraise, newWorship);
+    setPraiseSongIds(praiseIds.length > 0 ? praiseIds : [undefined]);
+    setWorshipSongIds(worshipIds.length > 0 ? worshipIds : [undefined]);
+
+    invalidateSongChanges();
+    await syncCategoriesForLineup(newPraise, newWorship, praiseIds, worshipIds);
     onRefreshSongs();
 
     showToast(
@@ -1489,17 +1930,31 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       ...cleanWorshipKeys,
       ...newWorshipImported.map((s) => s.originalKey || s.key || '')
     ];
+    const cleanPraiseIds = praiseSongIds.filter((_, idx) => Boolean(praiseSongs[idx]?.trim()));
+    const cleanWorshipIds = worshipSongIds.filter((_, idx) => Boolean(worshipSongs[idx]?.trim()));
+
+    const mergedPraiseIds = [
+      ...cleanPraiseIds,
+      ...newPraiseImported.map((s) => s.id)
+    ];
+    const mergedWorshipIds = [
+      ...cleanWorshipIds,
+      ...newWorshipImported.map((s) => s.id)
+    ];
 
     const finalPraise = mergedPraiseTitles.length > 0 ? mergedPraiseTitles : [''];
     const finalWorship = mergedWorshipTitles.length > 0 ? mergedWorshipTitles : [''];
 
     setPraiseSongs(finalPraise);
     setPraiseSongKeys(mergedPraiseKeys.length > 0 ? mergedPraiseKeys : ['']);
+    setPraiseSongIds(mergedPraiseIds.length > 0 ? mergedPraiseIds : [undefined]);
 
     setWorshipSongs(finalWorship);
     setWorshipSongKeys(mergedWorshipKeys.length > 0 ? mergedWorshipKeys : ['']);
+    setWorshipSongIds(mergedWorshipIds.length > 0 ? mergedWorshipIds : [undefined]);
 
-    await syncCategoriesForLineup(finalPraise, finalWorship);
+    invalidateSongChanges();
+    await syncCategoriesForLineup(finalPraise, finalWorship, mergedPraiseIds, mergedWorshipIds);
     onRefreshSongs();
 
     showToast(
@@ -1537,7 +1992,12 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     takeSnapshot(true);
     setPraiseSongs(['']);
     setWorshipSongs(['']);
+    setPraiseSongKeys(['']);
+    setWorshipSongKeys(['']);
+    setPraiseSongIds([undefined]);
+    setWorshipSongIds([undefined]);
     setSmartImportConfig({ isOpen: false });
+    invalidateSongChanges();
     showToast('Started blank service line-up.', 'info');
     window.dispatchEvent(
       new CustomEvent('blank-lineup-created', {
@@ -1777,6 +2237,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     setMinistryRows((rows) =>
       rows.map((row) => (row.id === id ? { ...row, role: newRole } : row))
     );
+    invalidateTeamChanges();
   };
 
   const handleMinistryNotesChange = (id: string, notes: string) => {
@@ -1799,6 +2260,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       });
       return syncMinistryRowsForSongLeaders(updated);
     });
+    invalidateTeamChanges();
   };
 
   const executeMemberAssignment = (rowId: string, memberIdx: number, memberId: string) => {
@@ -1822,6 +2284,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       });
       return syncMinistryRowsForSongLeaders(updated);
     });
+
+    invalidateTeamChanges();
 
     if (memberId) {
       window.dispatchEvent(
@@ -1886,6 +2350,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       });
       return syncMinistryRowsForSongLeaders(updated);
     });
+    invalidateTeamChanges();
   };
 
   const addMinistryRow = () => {
@@ -1897,11 +2362,13 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       notes: ''
     };
     setMinistryRows([...ministryRows, newRow]);
+    invalidateTeamChanges();
   };
 
   const removeMinistryRow = (id: string) => {
     takeSnapshot(true);
     setMinistryRows((rows) => syncMinistryRowsForSongLeaders(rows.filter((r) => r.id !== id)));
+    invalidateTeamChanges();
   };
 
   // Filter members dropdown helper based on smart role matching & date-aware DA check
@@ -1949,52 +2416,75 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   };
 
   const handleSave = () => {
-    const filteredPraise = praiseSongs.map((s) => s.trim()).filter(Boolean);
-    const filteredWorship = worshipSongs.map((s) => s.trim()).filter(Boolean);
+    const filteredPraise = noService ? [] : praiseSongs.map((s) => s.trim()).filter(Boolean);
+    const filteredWorship = noService ? [] : worshipSongs.map((s) => s.trim()).filter(Boolean);
 
-    const validAssignments = ministryRows
-      .filter((r) => r.role.trim() !== '')
-      .map((r) => {
-        const rawMembers = getAssignmentMembers(r);
-        const validMembers = rawMembers.filter((m) => m.memberId || m.memberName);
-        const joinedNames = validMembers.map(m => m.memberName).filter(Boolean).join(', ');
+    const validAssignments = noService
+      ? []
+      : ministryRows
+          .filter((r) => r.role.trim() !== '')
+          .map((r) => {
+            const rawMembers = getAssignmentMembers(r);
+            const validMembers = rawMembers.filter((m) => m.memberId || m.memberName);
+            const joinedNames = validMembers.map(m => m.memberName).filter(Boolean).join(', ');
 
-        return {
-          id: r.id,
-          role: r.role.trim(),
-          assignedMembers: validMembers,
-          memberId: validMembers[0]?.memberId || '',
-          memberName: joinedNames,
-          notes: r.notes || ''
-        };
-      });
+            return {
+              id: r.id,
+              role: r.role.trim(),
+              assignedMembers: validMembers,
+              memberId: validMembers[0]?.memberId || '',
+              memberName: joinedNames,
+              notes: r.notes || ''
+            };
+          });
 
-    const praiseSongIds = filteredPraise.map((s) => {
-      const found = allSongs.find((x) => x.title.trim().toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-      return found ? found.id : '';
-    });
+    const praiseSongIdsToSave = noService
+      ? []
+      : praiseSongs
+          .map((s, idx) => {
+            if (!s || !s.trim()) return undefined;
+            if (praiseSongIds[idx]) return praiseSongIds[idx];
+            const lower = s.trim().toLowerCase();
+            const matches = allSongs.filter((x) => x.title.trim().toLowerCase() === lower);
+            return matches.length === 1 ? matches[0].id : '';
+          })
+          .filter((_, idx) => Boolean(praiseSongs[idx]?.trim()))
+          .map((id) => id || '');
 
-    const worshipSongIds = filteredWorship.map((s) => {
-      const found = allSongs.find((x) => x.title.trim().toLowerCase() === s.trim().toLowerCase() || x.id === s.trim());
-      return found ? found.id : '';
-    });
+    const worshipSongIdsToSave = noService
+      ? []
+      : worshipSongs
+          .map((s, idx) => {
+            if (!s || !s.trim()) return undefined;
+            if (worshipSongIds[idx]) return worshipSongIds[idx];
+            const lower = s.trim().toLowerCase();
+            const matches = allSongs.filter((x) => x.title.trim().toLowerCase() === lower);
+            return matches.length === 1 ? matches[0].id : '';
+          })
+          .filter((_, idx) => Boolean(worshipSongs[idx]?.trim()))
+          .map((id) => id || '');
 
     const scheduleData: Omit<Schedule, 'id' | 'updatedAt'> = {
       serviceType,
       serviceDate,
       praiseSongs: filteredPraise,
       worshipSongs: filteredWorship,
-      praiseSongKeys: praiseSongs.map((s, i) => praiseSongKeys[i] || '').filter((_, i) => Boolean(praiseSongs[i]?.trim())),
-      worshipSongKeys: worshipSongs.map((s, i) => worshipSongKeys[i] || '').filter((_, i) => Boolean(worshipSongs[i]?.trim())),
-      praiseSongIds,
-      worshipSongIds,
-      ministryAssignments: validAssignments
+      praiseSongKeys: noService ? [] : praiseSongs.map((s, i) => praiseSongKeys[i] || '').filter((_, i) => Boolean(praiseSongs[i]?.trim())),
+      worshipSongKeys: noService ? [] : worshipSongs.map((s, i) => worshipSongKeys[i] || '').filter((_, i) => Boolean(worshipSongs[i]?.trim())),
+      praiseSongIds: praiseSongIdsToSave,
+      worshipSongIds: worshipSongIdsToSave,
+      ministryAssignments: validAssignments,
+      notes: serviceNotes.trim(),
+      noService,
+      noServiceReason: noService ? (noServiceReason.trim() || undefined) : undefined,
+      transitionNotes: noService ? {} : transitionNotes,
+      rehearsalChecklist: noService ? getDefaultRehearsalChecklist() : rehearsalChecklist
     };
 
     // Check if a saved schedule already exists for this exact serviceType + serviceDate
     const conflictingSchedule = schedules.find((s) => {
       if (editingSchedule?.id && s.id === editingSchedule.id) return false;
-      if (isScheduleEmpty(s)) return false;
+      if (isScheduleEmpty(s) || s.id.startsWith('placeholder_')) return false;
       return s.serviceType === serviceType && s.serviceDate === serviceDate;
     });
 
@@ -2004,50 +2494,69 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       return;
     }
 
-    // Check monthly usage for selected songs
-    const allSelectedSongs = Array.from(new Set([...filteredPraise, ...filteredWorship]));
-    let songsToCheck = allSelectedSongs;
-    const excludeScheduleId = editingSchedule?.id;
+    if (!noService) {
+      // Check monthly usage for selected songs (preserving slot IDs to isolate duplicate-title songs)
+      const selectedSlots: { title: string; id: string }[] = [];
+      const seenSlots = new Set<string>();
+      const pushSlot = (title: string, id: string) => {
+        const dedupeKey = id ? `id:${id}` : `title:${title.trim().toLowerCase()}`;
+        if (!seenSlots.has(dedupeKey)) {
+          seenSlots.add(dedupeKey);
+          selectedSlots.push({ title, id });
+        }
+      };
+      filteredPraise.forEach((title, idx) => pushSlot(title, praiseSongIdsToSave[idx] || ''));
+      filteredWorship.forEach((title, idx) => pushSlot(title, worshipSongIdsToSave[idx] || ''));
 
-    if (editingSchedule && editingSchedule.id) {
-      // When editing an existing line-up:
-      // Exclude songs that were already part of the original line-up and remain unchanged.
-      // Only perform duplicate checks on newly added or replaced songs.
-      const originalSongsSet = new Set(
-        [
-          ...(editingSchedule.praiseSongs || []),
-          ...(editingSchedule.worshipSongs || [])
-        ]
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean)
-      );
+      let slotsToCheck = selectedSlots;
+      const excludeScheduleId = editingSchedule?.id;
 
-      songsToCheck = allSelectedSongs.filter(
-        (songTitle) => !originalSongsSet.has(songTitle.trim().toLowerCase())
-      );
-    }
+      if (editingSchedule && editingSchedule.id) {
+        // When editing an existing line-up:
+        // Exclude songs that were already part of the original line-up and remain unchanged.
+        const originalIdsSet = new Set<string>();
+        const originalUnIdTitlesSet = new Set<string>();
+        (editingSchedule.praiseSongs || []).forEach((s, idx) => {
+          const id = (editingSchedule.praiseSongIds?.[idx] || '').trim();
+          if (id) originalIdsSet.add(id);
+          else if (s?.trim()) originalUnIdTitlesSet.add(s.trim().toLowerCase());
+        });
+        (editingSchedule.worshipSongs || []).forEach((s, idx) => {
+          const id = (editingSchedule.worshipSongIds?.[idx] || '').trim();
+          if (id) originalIdsSet.add(id);
+          else if (s?.trim()) originalUnIdTitlesSet.add(s.trim().toLowerCase());
+        });
 
-    const warnings: MonthlyUsageCheckResult[] = [];
-
-    songsToCheck.forEach((songTitle) => {
-      const check = SongService.checkMonthlyUsage(
-        songTitle,
-        serviceDate,
-        schedules,
-        excludeScheduleId,
-        serviceType,
-        allSongs
-      );
-      if (check.timesUsedThisMonth > 0) {
-        warnings.push(check);
+        slotsToCheck = selectedSlots.filter((slot) => {
+          if (slot.id) return !originalIdsSet.has(slot.id);
+          return !originalUnIdTitlesSet.has(slot.title.trim().toLowerCase());
+        });
       }
-    });
 
-    if (warnings.length > 0) {
-      setMonthlyWarnings(warnings);
-      setPendingSaveData({ data: scheduleData, id: editingSchedule?.id });
-      setIsMonthlyModalOpen(true);
-      return;
+      const warnings: MonthlyUsageCheckResult[] = [];
+
+      slotsToCheck.forEach((slot) => {
+        const check = SongService.checkMonthlyUsage(
+          slot.title,
+          serviceDate,
+          schedules,
+          excludeScheduleId,
+          serviceType,
+          allSongs,
+          undefined,
+          slot.id || undefined
+        );
+        if (check.timesUsedThisMonth > 0) {
+          warnings.push(check);
+        }
+      });
+
+      if (warnings.length > 0) {
+        setMonthlyWarnings(warnings);
+        setPendingSaveData({ data: scheduleData, id: editingSchedule?.id });
+        setIsMonthlyModalOpen(true);
+        return;
+      }
     }
 
     executeFinalSave(scheduleData, editingSchedule?.id);
@@ -2057,13 +2566,21 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     data: Omit<Schedule, 'id' | 'updatedAt'>,
     id?: string
   ) => {
+    const savedOk = onSaveSchedule(data, id);
+    if (savedOk === false) {
+      return;
+    }
+
     // Reset undo/redo history so this saved lineup starts clean
     LineupHistoryService.clearHistory(currentContextKey);
     setCanUndo(false);
     setCanRedo(false);
 
-    onSaveSchedule(data, id);
-    StorageService.saveDraftSchedule(null);
+    try {
+      StorageService.saveDraftScheduleChecked(null);
+    } catch (e) {
+      console.warn('[SchedulerView] Failed to clear draft after final save:', e);
+    }
     setIsMonthlyModalOpen(false);
     setMonthlyWarnings([]);
     setPendingSaveData(null);
@@ -2102,7 +2619,28 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     };
   }, [handleSave, handleUndo, handleRedo]);
 
-  const getTempSchedule = (): Schedule => {
+  const getTempSchedule = useCallback((): Schedule => {
+    if (noService) {
+      return {
+        id: editingSchedule?.id || 'temp',
+        serviceType,
+        serviceDate,
+        praiseSongs: [],
+        worshipSongs: [],
+        praiseSongKeys: [],
+        worshipSongKeys: [],
+        praiseSongIds: [],
+        worshipSongIds: [],
+        ministryAssignments: [],
+        notes: serviceNotes.trim(),
+        noService: true,
+        noServiceReason: noServiceReason.trim() || undefined,
+        transitionNotes: {},
+        rehearsalChecklist: getDefaultRehearsalChecklist(),
+        updatedAt: getManilaNowISO()
+      };
+    }
+
     const cleanP = praiseSongs.filter(Boolean);
     const cleanW = worshipSongs.filter(Boolean);
     return {
@@ -2113,8 +2651,26 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       worshipSongs: cleanW,
       praiseSongKeys: praiseSongKeys.filter((_, i) => Boolean(praiseSongs[i]?.trim())),
       worshipSongKeys: worshipSongKeys.filter((_, i) => Boolean(worshipSongs[i]?.trim())),
-      praiseSongIds: cleanP.map((s) => allSongs.find((x) => x.title.trim().toLowerCase() === s.trim().toLowerCase() || x.id === s.trim())?.id || ''),
-      worshipSongIds: cleanW.map((s) => allSongs.find((x) => x.title.trim().toLowerCase() === s.trim().toLowerCase() || x.id === s.trim())?.id || ''),
+      praiseSongIds: praiseSongs
+        .map((s, idx) => {
+          if (!s || !s.trim()) return undefined;
+          if (praiseSongIds[idx]) return praiseSongIds[idx];
+          const lower = s.trim().toLowerCase();
+          const matches = allSongs.filter((x) => x.title.trim().toLowerCase() === lower);
+          return matches.length === 1 ? matches[0].id : '';
+        })
+        .filter((_, idx) => Boolean(praiseSongs[idx]?.trim()))
+        .map((id) => id || ''),
+      worshipSongIds: worshipSongs
+        .map((s, idx) => {
+          if (!s || !s.trim()) return undefined;
+          if (worshipSongIds[idx]) return worshipSongIds[idx];
+          const lower = s.trim().toLowerCase();
+          const matches = allSongs.filter((x) => x.title.trim().toLowerCase() === lower);
+          return matches.length === 1 ? matches[0].id : '';
+        })
+        .filter((_, idx) => Boolean(worshipSongs[idx]?.trim()))
+        .map((id) => id || ''),
       ministryAssignments: ministryRows
         .filter((r) => r.role.trim() !== '')
         .map((r) => {
@@ -2131,9 +2687,36 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             notes: r.notes || ''
           };
         }),
+      notes: serviceNotes.trim(),
+      noService: false,
+      noServiceReason: undefined,
+      transitionNotes,
+      rehearsalChecklist,
       updatedAt: getManilaNowISO()
     };
-  };
+  }, [editingSchedule, serviceType, serviceDate, praiseSongs, worshipSongs, praiseSongKeys, worshipSongKeys, praiseSongIds, worshipSongIds, allSongs, ministryRows, serviceNotes, noService, noServiceReason, transitionNotes, rehearsalChecklist, getDefaultRehearsalChecklist]);
+
+  const handleCopyServiceBrief = useCallback(async () => {
+    const temp = getTempSchedule();
+    if (isScheduleEmpty(temp)) {
+      showToast('Lineup is empty. Add songs before copying service brief.', 'danger');
+      return;
+    }
+    const briefText = generateServiceBrief(temp, allSongs);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(briefText);
+        setCopiedBrief(true);
+        triggerHaptic('success');
+        showToast('Service brief copied to clipboard for team chat!', 'success');
+        setTimeout(() => setCopiedBrief(false), 3000);
+      } else {
+        setBriefModalText(briefText);
+      }
+    } catch {
+      setBriefModalText(briefText);
+    }
+  }, [getTempSchedule, allSongs, showToast]);
 
   const handleExportPDF = () => {
     const temp = getTempSchedule();
@@ -2163,8 +2746,226 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
     );
   };
 
+  const handleExportRehearsalSheet = useCallback(async () => {
+    const temp = getTempSchedule();
+    if (isScheduleEmpty(temp)) {
+      showToast('Lineup is empty. Add songs before exporting rehearsal sheet.', 'danger');
+      return;
+    }
+    setIsExportingRehearsalSheet(true);
+    try {
+      await exportRehearsalSheetAsPDF(temp, allSongs);
+      showToast('Print-ready Rehearsal Sheet PDF exported successfully!', 'success');
+    } catch (err) {
+      console.error('Export rehearsal sheet error:', err);
+      showToast('Failed to export Rehearsal Sheet PDF.', 'danger');
+    } finally {
+      setIsExportingRehearsalSheet(false);
+    }
+  }, [getTempSchedule, allSongs, showToast]);
+
+  const handleApplyTemplate = useCallback((template: LineupTemplate, options: { includeKeys: boolean; includeMembers: boolean }) => {
+    // 0. Capture pre-template state for Undo BEFORE mutating state
+    takeSnapshot(true);
+
+    setNoService(false);
+    setNoServiceReason('');
+
+    // 1. Prepare song arrays (strictly preserving slot length alignment)
+    const pSongs = template.praiseSongs.length > 0 ? [...template.praiseSongs] : [''];
+    const wSongs = template.worshipSongs.length > 0 ? [...template.worshipSongs] : [''];
+    const pKeys = pSongs.map((_, idx) => (options.includeKeys ? (template.praiseSongKeys?.[idx] || '') : ''));
+    const wKeys = wSongs.map((_, idx) => (options.includeKeys ? (template.worshipSongKeys?.[idx] || '') : ''));
+    const pIds = pSongs.map((_, idx) => template.praiseSongIds?.[idx] || undefined);
+    const wIds = wSongs.map((_, idx) => template.worshipSongIds?.[idx] || undefined);
+
+    setPraiseSongs(pSongs);
+    setWorshipSongs(wSongs);
+    setPraiseSongKeys(pKeys);
+    setWorshipSongKeys(wKeys);
+    setPraiseSongIds(pIds);
+    setWorshipSongIds(wIds);
+
+    // 2. Set service type if specified
+    if (template.serviceType) {
+      setServiceType(template.serviceType);
+    }
+
+    // 3. Ministry rows (synced to Song Leader layout rules)
+    if (template.ministryAssignments && template.ministryAssignments.length > 0) {
+      const rows = template.ministryAssignments.map((a, idx) => ({
+        id: a.id || `m-row-tpl-${idx}-${Date.now()}`,
+        role: a.role,
+        assignedMembers:
+          options.includeMembers && a.assignedMembers && a.assignedMembers.length > 0
+            ? a.assignedMembers.map((m) => ({ ...m }))
+            : [{ memberId: '', memberName: '' }],
+        notes: a.notes || ''
+      }));
+      setMinistryRows(syncMinistryRowsForSongLeaders(rows));
+    } else if (template.ministryRoles && template.ministryRoles.length > 0) {
+      const rows = template.ministryRoles.map((roleName, idx) => ({
+        id: `m-row-tpl-${idx}-${Date.now()}`,
+        role: roleName,
+        assignedMembers: [{ memberId: '', memberName: '' }],
+        notes: ''
+      }));
+      setMinistryRows(syncMinistryRowsForSongLeaders(rows));
+    }
+
+    // 4. Reset notes & transitions unconditionally so stale prior-draft values never bleed through
+    setServiceNotes(template.notes || '');
+    setTransitionNotes(template.transitionNotes ? { ...template.transitionNotes } : {});
+
+    // 5. Reset rehearsal checklist for the newly applied template
+    setRehearsalChecklist(getDefaultRehearsalChecklist());
+
+    showToast(`Template "${template.name}" applied as active draft!`, 'success');
+  }, [getDefaultRehearsalChecklist, takeSnapshot, showToast]);
+
+  const lineupDurationSummary = useMemo(() => {
+    const cleanP = praiseSongs.map((s, idx) => ({ title: s.trim(), origIdx: idx })).filter((x) => Boolean(x.title));
+    const cleanW = worshipSongs.map((s, idx) => ({ title: s.trim(), origIdx: idx })).filter((x) => Boolean(x.title));
+    const allTitles = [...cleanP.map((p) => p.title), ...cleanW.map((w) => w.title)];
+    const allIds = [
+      ...cleanP.map((p) => resolveSlotSong(p.title, praiseSongIds[p.origIdx], allSongs).song?.id),
+      ...cleanW.map((w) => resolveSlotSong(w.title, worshipSongIds[w.origIdx], allSongs).song?.id)
+    ];
+    return calculateLineupDuration(allTitles, allIds, allSongs);
+  }, [praiseSongs, worshipSongs, praiseSongIds, worshipSongIds, allSongs]);
+
+  interface LineupTransitionItem {
+    id: string;
+    section: 'praise' | 'worship' | 'cross_section';
+    fromIdx: number;
+    toIdx: number;
+    sectionLabel: string;
+    fromSong: string;
+    toSong: string;
+    fromSongId?: string;
+    toSongId?: string;
+    fromKey?: string;
+    toKey?: string;
+    fromBpm?: number;
+    toBpm?: number;
+    fromTimeSig?: string;
+    toTimeSig?: string;
+    keyTransitionDesc: string;
+  }
+
+  const lineupTransitions = useMemo((): LineupTransitionItem[] => {
+    const transitions: LineupTransitionItem[] = [];
+
+    const cleanPraise: { title: string; key: string; origIdx: number; songId?: string }[] = [];
+    praiseSongs.forEach((s, idx) => {
+      if (s && s.trim()) {
+        const slotId = praiseSongIds[idx];
+        cleanPraise.push({ title: s.trim(), key: (praiseSongKeys[idx] || '').trim(), origIdx: idx, songId: slotId });
+      }
+    });
+
+    const cleanWorship: { title: string; key: string; origIdx: number; songId?: string }[] = [];
+    worshipSongs.forEach((s, idx) => {
+      if (s && s.trim()) {
+        const slotId = worshipSongIds[idx];
+        cleanWorship.push({ title: s.trim(), key: (worshipSongKeys[idx] || '').trim(), origIdx: idx, songId: slotId });
+      }
+    });
+
+    const findSong = (title: string, slotId?: string) => resolveSlotSong(title, slotId, allSongs).song;
+
+    // 1. Praise internal transitions
+    for (let i = 0; i < cleanPraise.length - 1; i++) {
+      const from = cleanPraise[i];
+      const to = cleanPraise[i + 1];
+      const mFrom = findSong(from.title, from.songId);
+      const mTo = findSong(to.title, to.songId);
+      const effectiveFromKey = from.key;
+      const effectiveToKey = to.key;
+
+      transitions.push({
+        id: getTransitionPairId('praise', from.title, to.title, from.songId, to.songId),
+        section: 'praise',
+        fromIdx: i,
+        toIdx: i + 1,
+        sectionLabel: `Praise ${i + 1} → Praise ${i + 2}`,
+        fromSong: from.title,
+        toSong: to.title,
+        fromSongId: from.songId,
+        toSongId: to.songId,
+        fromKey: effectiveFromKey,
+        toKey: effectiveToKey,
+        fromBpm: mFrom?.bpm,
+        toBpm: mTo?.bpm,
+        fromTimeSig: mFrom?.timeSignature,
+        toTimeSig: mTo?.timeSignature,
+        keyTransitionDesc: describeKeyTransition(effectiveFromKey, effectiveToKey)
+      });
+    }
+
+    // 2. Cross-section transition: Last Praise -> First Worship
+    if (cleanPraise.length > 0 && cleanWorship.length > 0) {
+      const from = cleanPraise[cleanPraise.length - 1];
+      const to = cleanWorship[0];
+      const mFrom = findSong(from.title, from.songId);
+      const mTo = findSong(to.title, to.songId);
+      const effectiveFromKey = from.key;
+      const effectiveToKey = to.key;
+
+      transitions.push({
+        id: 'cross_section',
+        section: 'cross_section',
+        fromIdx: cleanPraise.length - 1,
+        toIdx: 0,
+        sectionLabel: 'Praise Final → Worship Start (Prayer / Exhortation)',
+        fromSong: from.title,
+        toSong: to.title,
+        fromSongId: from.songId,
+        toSongId: to.songId,
+        fromKey: effectiveFromKey,
+        toKey: effectiveToKey,
+        fromBpm: mFrom?.bpm,
+        toBpm: mTo?.bpm,
+        fromTimeSig: mFrom?.timeSignature,
+        toTimeSig: mTo?.timeSignature,
+        keyTransitionDesc: describeKeyTransition(effectiveFromKey, effectiveToKey)
+      });
+    }
+
+    // 3. Worship internal transitions
+    for (let i = 0; i < cleanWorship.length - 1; i++) {
+      const from = cleanWorship[i];
+      const to = cleanWorship[i + 1];
+      const mFrom = findSong(from.title, from.songId);
+      const mTo = findSong(to.title, to.songId);
+      const effectiveFromKey = from.key;
+      const effectiveToKey = to.key;
+
+      transitions.push({
+        id: getTransitionPairId('worship', from.title, to.title, from.songId, to.songId),
+        section: 'worship',
+        fromIdx: i,
+        toIdx: i + 1,
+        sectionLabel: `Worship ${i + 1} → Worship ${i + 2}`,
+        fromSong: from.title,
+        toSong: to.title,
+        fromSongId: from.songId,
+        toSongId: to.songId,
+        fromKey: effectiveFromKey,
+        toKey: effectiveToKey,
+        fromBpm: mFrom?.bpm,
+        toBpm: mTo?.bpm,
+        fromTimeSig: mFrom?.timeSignature,
+        toTimeSig: mTo?.timeSignature,
+        keyTransitionDesc: describeKeyTransition(effectiveFromKey, effectiveToKey)
+      });
+    }
+
+    return transitions;
+  }, [praiseSongs, praiseSongKeys, praiseSongIds, worshipSongs, worshipSongKeys, worshipSongIds, allSongs]);
+
   return (
-    <div data-tour="scheduler-view" className="space-y-6 max-w-5xl mx-auto animate-in fade-in duration-300">
+    <div data-tour="scheduler-view" className="space-y-6 max-w-5xl mx-auto pb-36 sm:pb-40 animate-in fade-in duration-300">
       {/* Title Header */}
       <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -2233,18 +3034,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
               <span>
-                A saved lineup already exists for <strong>{existingMatchingSched.serviceType}</strong> on <strong>{existingMatchingSched.serviceDate}</strong>. Your active draft remains intact.
+                A saved {isNoServiceSchedule(existingMatchingSched) ? 'No Service record' : 'lineup'} already exists for <strong>{existingMatchingSched.serviceType}</strong> on <strong>{existingMatchingSched.serviceDate}</strong>. Your active draft remains intact.
               </span>
             </div>
             <button
               type="button"
               onClick={() => {
                 loadScheduleDataIntoEditor(existingMatchingSched);
-                showToast(`Loaded existing lineup for ${existingMatchingSched.serviceDate}`, 'info');
+                showToast(`Loaded existing ${isNoServiceSchedule(existingMatchingSched) ? 'No Service record' : 'lineup'} for ${existingMatchingSched.serviceDate}`, 'info');
               }}
               className="px-3 py-1 font-semibold text-amber-900 dark:text-amber-100 bg-amber-200/80 dark:bg-amber-900/60 hover:bg-amber-300 dark:hover:bg-amber-800 rounded-lg transition-colors cursor-pointer shrink-0"
             >
-              Load Existing Lineup
+              Load Existing Schedule
             </button>
           </div>
         );
@@ -2257,8 +3058,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             <Church className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
             <span>Service Details & Context</span>
           </h3>
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20">
-            {serviceType} • {serviceDate ? formatDateDisplayManila(serviceDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date set'}
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              noService
+                ? 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                : 'bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border-[#1b75bc]/20'
+            }`}
+          >
+            {noService && <Ban className="w-3 h-3 shrink-0" />}
+            <span>
+              {noService ? 'No Service • ' : ''}
+              {serviceType} • {serviceDate ? formatDateDisplayManila(serviceDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date set'}
+            </span>
           </span>
         </div>
 
@@ -2295,14 +3106,122 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             />
           </div>
         </div>
+
+        {/* Explicit No Service Toggle & Reason (NS-01) */}
+        <div
+          className={`p-4 rounded-xl border transition-colors ${
+            noService
+              ? 'bg-slate-100/90 dark:bg-slate-900/80 border-slate-300 dark:border-slate-700'
+              : 'bg-white/50 dark:bg-black/20 border-slate-200/80 dark:border-white/10'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div
+                className={`p-2 rounded-lg shrink-0 ${
+                  noService
+                    ? 'bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Ban className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  No Service Status
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                  Mark this date as having no regular worship service (clears songs, assignments, and transitions while preserving Service Notes).
+                </p>
+              </div>
+            </div>
+
+            <label
+              htmlFor="scheduler-no-service-checkbox"
+              className={`inline-flex items-center justify-center gap-2.5 px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-bold border transition-colors cursor-pointer shrink-0 select-none focus-within:ring-2 focus-within:ring-[#1b75bc]/50 ${
+                noService
+                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-slate-900 dark:border-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <input
+                id="scheduler-no-service-checkbox"
+                type="checkbox"
+                checked={noService}
+                onChange={(e) => handleToggleNoService(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] cursor-pointer accent-[#1b75bc]"
+              />
+              <span>No Service</span>
+            </label>
+          </div>
+
+          {noService && (
+            <div className="mt-3.5 pt-3.5 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+              <label
+                htmlFor="no-service-reason-input"
+                className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+              >
+                <span>Reason / Announcement (Optional)</span>
+                <span className="text-[11px] font-normal normal-case text-slate-400 dark:text-slate-500">
+                  {noServiceReason.length}/300
+                </span>
+              </label>
+              <input
+                id="no-service-reason-input"
+                type="text"
+                maxLength={300}
+                value={noServiceReason}
+                onChange={(e) => {
+                  takeSnapshot(false);
+                  setNoServiceReason(e.target.value);
+                }}
+                placeholder="e.g., Church Anniversary Combined Service, Camp Retreat, Holiday Break..."
+                className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-[#1b75bc]/40 focus:border-[#1b75bc] outline-none"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
+      {noService ? (
+        <div className="p-6 sm:p-8 rounded-2xl wwcf-glass-card border border-slate-200/80 dark:border-slate-800 shadow-xs text-center space-y-4">
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300">
+            <Ban className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5 max-w-lg mx-auto">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+              No Service Scheduled for {formatDateDisplayManila(serviceDate, { month: 'long', day: 'numeric', year: 'numeric' })}
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              This <strong>{serviceType}</strong> date is marked as <strong>No Service</strong>. Song lineup slots, team assignments, transitions, and the rehearsal checklist are omitted and will not count toward song usage or analytics.
+            </p>
+            {noServiceReason.trim() && (
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/70 px-3 py-1.5 rounded-lg inline-block mt-1">
+                Reason: {noServiceReason.trim()}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+            <button
+              type="button"
+              onClick={() => handleToggleNoService(false)}
+              className="btn-tactile inline-flex items-center gap-2 px-4 py-2 min-h-[40px] text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-colors cursor-pointer"
+            >
+              <Music className="w-3.5 h-3.5" />
+              <span>Resume Lineup Planning</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Smart Song Recommendations Panel */}
       <SongRecommendationsPanel
         allSongs={allSongs}
         schedules={schedules}
         currentPraiseSongs={praiseSongs}
         currentWorshipSongs={worshipSongs}
+        currentPraiseSongIds={praiseSongIds}
+        currentWorshipSongIds={worshipSongIds}
         serviceDate={serviceDate}
         serviceType={serviceType}
         onAddSong={handleAddRecommendedSong}
@@ -2312,12 +3231,55 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       {/* 2. Song List Section */}
       <div data-tour="add-songs-section" className="p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-200/60 dark:border-white/5">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-            <Music className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
-            <span>Worship & Praise Songs</span>
-          </h3>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <Music className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
+              <span>Worship & Praise Songs</span>
+            </h3>
+
+            {/* S-01 Estimated Duration Badge */}
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20 shadow-2xs"
+              title="Estimated total setlist music duration based on known songs"
+            >
+              <Clock className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
+              <span>Est. Setlist: {lineupDurationSummary.summaryLabel}</span>
+            </span>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsTemplatesModalOpen(true)}
+              className="px-3 py-1.5 bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/25 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Browse, apply, or create reusable lineup presets"
+            >
+              <LayoutTemplate className="w-3.5 h-3.5" />
+              <span>Templates</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsPrompterOpen(true)}
+              disabled={noService}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white dark:bg-white/10 dark:hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Launch stage-friendly live rehearsal prompter"
+            >
+              <Tv className="w-3.5 h-3.5 text-amber-400" />
+              <span>Live Prompter</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsLyricsPresentationOpen(true)}
+              disabled={noService}
+              className="px-3 py-1.5 bg-[#1b75bc] hover:bg-[#155d97] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Open dual-window Lyrics Presenter & Audience Output console"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span>Present Lyrics</span>
+            </button>
+
             <button
               type="button"
               data-tour="blank-lineup-btn"
@@ -2441,107 +3403,222 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                       onDragOver={(e) => handleItemDragOver(e, 'praise', idx)}
                       onDrop={(e) => handleItemDrop(e, 'praise', idx)}
                       onPointerDown={(e) => {
-                        if ((e.target as HTMLElement).closest('input, select, textarea, button, [role="button"]')) {
+                        if ((e.target as HTMLElement).closest('input, select, textarea, button, a, [role="button"]')) {
                           setActiveDragHandle(null);
                         }
                       }}
-                      className={`group flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 sm:p-2 bg-white dark:bg-slate-900 rounded-xl border transition-all ${
+                      className={`group flex flex-col gap-2 p-2.5 sm:p-2.5 bg-white dark:bg-slate-900 rounded-xl border transition-all ${
                         isBeingDragged
                           ? 'opacity-40 border-dashed border-amber-400 dark:border-amber-500 scale-[0.99]'
                           : 'border-slate-200 dark:border-slate-800 shadow-2xs'
                       }`}
                     >
-                      {/* Top Row on Mobile: Drag, Index, Autocomplete */}
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {/* Drag Handle */}
-                        <div
-                          onMouseDown={() => setActiveDragHandle({ category: 'praise', index: idx })}
-                          onTouchStart={() => setActiveDragHandle({ category: 'praise', index: idx })}
-                          className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors shrink-0 select-none"
-                          title="Drag to reorder or move to Worship (Slow)"
-                        >
-                          <GripVertical className="w-4 h-4" />
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        {/* Top Row on Mobile: Drag, Index, Autocomplete */}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {/* Drag Handle */}
+                          <div
+                            onMouseDown={() => setActiveDragHandle({ category: 'praise', index: idx })}
+                            onTouchStart={() => setActiveDragHandle({ category: 'praise', index: idx })}
+                            className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors shrink-0 select-none"
+                            title="Drag to reorder or move to Worship (Slow)"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+
+                          <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-4 text-center shrink-0">
+                            {String(idx + 1).padStart(2, '0')}
+                          </span>
+
+                          <div className="flex-1 min-w-[180px] sm:min-w-[240px]">
+                            <SongAutocomplete
+                              value={song}
+                              onChange={(val, selectedSong) => handlePraiseChange(idx, val, selectedSong)}
+                              category="praise"
+                              serviceDate={serviceDate}
+                              serviceType={serviceType}
+                              allSongs={allSongs}
+                              schedules={schedules}
+                              currentLineupSongs={[...praiseSongs, ...worshipSongs]}
+                              currentLineupSongIds={[...praiseSongIds, ...worshipSongIds]}
+                              currentSongIndex={idx}
+                              excludeScheduleId={editingSchedule?.id}
+                              placeholder="Search or enter praise song..."
+                              onOpenLibrary={() =>
+                                setPickerConfig({ isOpen: true, category: 'praise', songIndex: idx })
+                              }
+                            />
+                          </div>
                         </div>
 
-                        <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-4 text-center shrink-0">
-                          {String(idx + 1).padStart(2, '0')}
-                        </span>
+                        {/* Bottom Row on Mobile / Inline on Desktop: Key, Category, Move, Remove */}
+                        <div className="flex items-center justify-between sm:justify-start gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800/60 w-full sm:w-auto shrink-0 pl-6 sm:pl-0">
+                          {/* Performed Key Field */}
+                          <div className="w-20 shrink-0" title="Performed Key (defaults to Original Key)">
+                            <input
+                              type="text"
+                              value={praiseSongKeys[idx] || ''}
+                              onChange={(e) => handlePraiseKeyChange(idx, e.target.value)}
+                              placeholder="Key"
+                              className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
+                            />
+                          </div>
 
-                        <div className="flex-1 min-w-[180px] sm:min-w-[240px]">
-                          <SongAutocomplete
-                            value={song}
-                            onChange={(val) => handlePraiseChange(idx, val)}
-                            category="praise"
-                            serviceDate={serviceDate}
-                            serviceType={serviceType}
-                            allSongs={allSongs}
-                            schedules={schedules}
-                            currentLineupSongs={[...praiseSongs, ...worshipSongs]}
-                            currentSongIndex={idx}
-                            excludeScheduleId={editingSchedule?.id}
-                            placeholder="Search or enter praise song..."
-                            onOpenLibrary={() =>
-                              setPickerConfig({ isOpen: true, category: 'praise', songIndex: idx })
+                          {/* Category Switcher */}
+                          <select
+                            value="praise"
+                            onChange={(e) =>
+                              changeSongCategory('praise', idx, e.target.value as 'praise' | 'worship')
                             }
-                          />
+                            className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-amber-200 dark:border-amber-900/80 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 outline-none cursor-pointer shrink-0"
+                            title="Change Category"
+                          >
+                            <option value="praise">Praise</option>
+                            <option value="worship">Worship</option>
+                          </select>
+
+                          {/* Move Up/Down Controls */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveSongUp('praise', idx)}
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              title="Move Up"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveSongDown('praise', idx)}
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              title="Move Down"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removePraiseSong(idx)}
+                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded transition-colors cursor-pointer shrink-0 ml-auto sm:ml-0"
+                            aria-label="Remove song"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
-                      {/* Bottom Row on Mobile / Inline on Desktop: Key, Category, Move, Remove */}
-                      <div className="flex items-center justify-between sm:justify-start gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800/60 w-full sm:w-auto shrink-0 pl-6 sm:pl-0">
-                        {/* Performed Key Field */}
-                        <div className="w-20 shrink-0" title="Performed Key (defaults to Original Key)">
-                          <input
-                            type="text"
-                            value={praiseSongKeys[idx] || ''}
-                            onChange={(e) => handlePraiseKeyChange(idx, e.target.value)}
-                            placeholder="Key"
-                            className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
-                          />
-                        </div>
+                      {/* S-03 Compact Song Information Strip & S-02 External Quick Links */}
+                      {(() => {
+                        const slotId = praiseSongIds[idx];
+                        const slotResolved = resolveSlotSong(song, slotId, allSongs);
+                        const matched = slotResolved.song;
+                        if (!matched && !song.trim()) return null;
+                        const links = getSongReferenceLinks(matched);
+                        const performedKey = (praiseSongKeys[idx] || '').trim();
+                        const origKey = matched?.originalKey || matched?.key;
+                        const lyricsReady = matched ? hasUsableLyrics(matched.lyrics) : false;
+                        const usableCharts = matched
+                          ? (matched.instrumentCharts || []).filter((c) => c && typeof c.content === 'string' && c.content.trim().length > 0)
+                          : [];
 
-                        {/* Category Switcher */}
-                        <select
-                          value="praise"
-                          onChange={(e) =>
-                            changeSongCategory('praise', idx, e.target.value as 'praise' | 'worship')
-                          }
-                          className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-amber-200 dark:border-amber-900/80 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 outline-none cursor-pointer shrink-0"
-                          title="Change Category"
-                        >
-                          <option value="praise">Praise</option>
-                          <option value="worship">Worship</option>
-                        </select>
+                        return (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-slate-800 text-[11px] w-full">
+                            {performedKey ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20">
+                                <span>Performed Key: {performedKey}</span>
+                                {origKey && origKey.toLowerCase() !== performedKey.toLowerCase() && (
+                                  <span className="text-[10px] font-normal opacity-75">(Orig: {origKey})</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700">
+                                <span>Performed key not set</span>
+                                {origKey && (
+                                  <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">(Orig: {origKey})</span>
+                                )}
+                              </span>
+                            )}
+                            {matched?.bpm ? (
+                              <span className="px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                {matched.bpm} BPM
+                              </span>
+                            ) : null}
+                            {matched?.timeSignature ? (
+                              <span className="px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                {matched.timeSignature}
+                              </span>
+                            ) : null}
+                            {matched?.duration ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span>{matched.duration}</span>
+                              </span>
+                            ) : null}
 
-                        {/* Move Up/Down Controls */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => moveSongUp('praise', idx)}
-                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
-                            title="Move Up"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveSongDown('praise', idx)}
-                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
-                            title="Move Down"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                            {matched ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSongForLyrics(matched)}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border transition-colors cursor-pointer ${
+                                    lyricsReady
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                                      : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+                                  }`}
+                                  title={lyricsReady ? 'View or edit song lyrics' : 'Missing lyrics — click to add lyrics to catalog song'}
+                                >
+                                  <BookOpen className="w-3 h-3 shrink-0" />
+                                  <span>{lyricsReady ? 'Lyrics Ready · Edit' : 'Missing Lyrics · Add'}</span>
+                                </button>
+                                {usableCharts.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setChartPreviewTarget({
+                                        song: matched,
+                                        performedKey: performedKey || undefined,
+                                        sectionLabel: `Praise Song ${idx + 1}`
+                                      })
+                                    }
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] border-[#1b75bc]/25 hover:bg-[#1b75bc]/20 dark:hover:bg-[#1b75bc]/30 transition-colors cursor-pointer"
+                                    title={`Open chord & cue charts (${usableCharts.map((c) => CHART_INSTRUMENT_LABELS[c.instrument]).join(', ')})`}
+                                  >
+                                    <Guitar className="w-3 h-3 shrink-0" />
+                                    <span>Charts ({usableCharts.length})</span>
+                                  </button>
+                                )}
+                              </>
+                            ) : slotResolved.isAmbiguous ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>Ambiguous song match</span>
+                              </span>
+                            ) : slotResolved.isStaleId ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>Catalog song not found</span>
+                              </span>
+                            ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => removePraiseSong(idx)}
-                          className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded transition-colors cursor-pointer shrink-0 ml-auto sm:ml-0"
-                          aria-label="Remove song"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                            {/* Reference Links */}
+                            {links.map((link) => (
+                              <a
+                                key={link.service}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border transition-colors cursor-pointer ${link.colorClass}`}
+                                title={`Open ${link.label}`}
+                              >
+                                <span>{link.label}</span>
+                                <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Insertion line indicator below item */}
@@ -2678,107 +3755,222 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                       onDragOver={(e) => handleItemDragOver(e, 'worship', idx)}
                       onDrop={(e) => handleItemDrop(e, 'worship', idx)}
                       onPointerDown={(e) => {
-                        if ((e.target as HTMLElement).closest('input, select, textarea, button, [role="button"]')) {
+                        if ((e.target as HTMLElement).closest('input, select, textarea, button, a, [role="button"]')) {
                           setActiveDragHandle(null);
                         }
                       }}
-                      className={`group flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 sm:p-2 bg-white dark:bg-slate-900 rounded-xl border transition-all ${
+                      className={`group flex flex-col gap-2 p-2.5 sm:p-2.5 bg-white dark:bg-slate-900 rounded-xl border transition-all ${
                         isBeingDragged
                           ? 'opacity-40 border-dashed border-indigo-400 dark:border-indigo-500 scale-[0.99]'
                           : 'border-slate-200 dark:border-slate-800 shadow-2xs'
                       }`}
                     >
-                      {/* Top Row on Mobile: Drag, Index, Autocomplete */}
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {/* Drag Handle */}
-                        <div
-                          onMouseDown={() => setActiveDragHandle({ category: 'worship', index: idx })}
-                          onTouchStart={() => setActiveDragHandle({ category: 'worship', index: idx })}
-                          className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors shrink-0 select-none"
-                          title="Drag to reorder or move to Praise (Fast)"
-                        >
-                          <GripVertical className="w-4 h-4" />
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        {/* Top Row on Mobile: Drag, Index, Autocomplete */}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {/* Drag Handle */}
+                          <div
+                            onMouseDown={() => setActiveDragHandle({ category: 'worship', index: idx })}
+                            onTouchStart={() => setActiveDragHandle({ category: 'worship', index: idx })}
+                            className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors shrink-0 select-none"
+                            title="Drag to reorder or move to Praise (Fast)"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+
+                          <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-4 text-center shrink-0">
+                            {String(idx + 1).padStart(2, '0')}
+                          </span>
+
+                          <div className="flex-1 min-w-[180px] sm:min-w-[240px]">
+                            <SongAutocomplete
+                              value={song}
+                              onChange={(val, selectedSong) => handleWorshipChange(idx, val, selectedSong)}
+                              category="worship"
+                              serviceDate={serviceDate}
+                              serviceType={serviceType}
+                              allSongs={allSongs}
+                              schedules={schedules}
+                              currentLineupSongs={[...praiseSongs, ...worshipSongs]}
+                              currentLineupSongIds={[...praiseSongIds, ...worshipSongIds]}
+                              currentSongIndex={praiseSongs.length + idx}
+                              excludeScheduleId={editingSchedule?.id}
+                              placeholder="Search or enter worship song..."
+                              onOpenLibrary={() =>
+                                setPickerConfig({ isOpen: true, category: 'worship', songIndex: idx })
+                              }
+                            />
+                          </div>
                         </div>
 
-                        <span className="text-xs font-bold text-slate-300 dark:text-slate-600 w-4 text-center shrink-0">
-                          {String(idx + 1).padStart(2, '0')}
-                        </span>
+                        {/* Bottom Row on Mobile / Inline on Desktop: Key, Category, Move, Remove */}
+                        <div className="flex items-center justify-between sm:justify-start gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800/60 w-full sm:w-auto shrink-0 pl-6 sm:pl-0">
+                          {/* Performed Key Field */}
+                          <div className="w-20 shrink-0" title="Performed Key (defaults to Original Key)">
+                            <input
+                              type="text"
+                              value={worshipSongKeys[idx] || ''}
+                              onChange={(e) => handleWorshipKeyChange(idx, e.target.value)}
+                              placeholder="Key"
+                              className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
+                            />
+                          </div>
 
-                        <div className="flex-1 min-w-[180px] sm:min-w-[240px]">
-                          <SongAutocomplete
-                            value={song}
-                            onChange={(val) => handleWorshipChange(idx, val)}
-                            category="worship"
-                            serviceDate={serviceDate}
-                            serviceType={serviceType}
-                            allSongs={allSongs}
-                            schedules={schedules}
-                            currentLineupSongs={[...praiseSongs, ...worshipSongs]}
-                            currentSongIndex={praiseSongs.length + idx}
-                            excludeScheduleId={editingSchedule?.id}
-                            placeholder="Search or enter worship song..."
-                            onOpenLibrary={() =>
-                              setPickerConfig({ isOpen: true, category: 'worship', songIndex: idx })
+                          {/* Category Switcher */}
+                          <select
+                            value="worship"
+                            onChange={(e) =>
+                              changeSongCategory('worship', idx, e.target.value as 'praise' | 'worship')
                             }
-                          />
+                            className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-indigo-200 dark:border-indigo-900/80 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 outline-none cursor-pointer shrink-0"
+                            title="Change Category"
+                          >
+                            <option value="praise">Praise</option>
+                            <option value="worship">Worship</option>
+                          </select>
+
+                          {/* Move Up/Down Controls */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveSongUp('worship', idx)}
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              title="Move Up"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveSongDown('worship', idx)}
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              title="Move Down"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeWorshipSong(idx)}
+                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded transition-colors cursor-pointer shrink-0 ml-auto sm:ml-0"
+                            aria-label="Remove song"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
-                      {/* Bottom Row on Mobile / Inline on Desktop: Key, Category, Move, Remove */}
-                      <div className="flex items-center justify-between sm:justify-start gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800/60 w-full sm:w-auto shrink-0 pl-6 sm:pl-0">
-                        {/* Performed Key Field */}
-                        <div className="w-20 shrink-0" title="Performed Key (defaults to Original Key)">
-                          <input
-                            type="text"
-                            value={worshipSongKeys[idx] || ''}
-                            onChange={(e) => handleWorshipKeyChange(idx, e.target.value)}
-                            placeholder="Key"
-                            className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
-                          />
-                        </div>
+                      {/* S-03 Compact Song Information Strip & S-02 External Quick Links */}
+                      {(() => {
+                        const slotId = worshipSongIds[idx];
+                        const slotResolved = resolveSlotSong(song, slotId, allSongs);
+                        const matched = slotResolved.song;
+                        if (!matched && !song.trim()) return null;
+                        const links = getSongReferenceLinks(matched);
+                        const performedKey = (worshipSongKeys[idx] || '').trim();
+                        const origKey = matched?.originalKey || matched?.key;
+                        const lyricsReady = matched ? hasUsableLyrics(matched.lyrics) : false;
+                        const usableCharts = matched
+                          ? (matched.instrumentCharts || []).filter((c) => c && typeof c.content === 'string' && c.content.trim().length > 0)
+                          : [];
 
-                        {/* Category Switcher */}
-                        <select
-                          value="worship"
-                          onChange={(e) =>
-                            changeSongCategory('worship', idx, e.target.value as 'praise' | 'worship')
-                          }
-                          className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-indigo-200 dark:border-indigo-900/80 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 outline-none cursor-pointer shrink-0"
-                          title="Change Category"
-                        >
-                          <option value="praise">Praise</option>
-                          <option value="worship">Worship</option>
-                        </select>
+                        return (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-slate-800 text-[11px] w-full">
+                            {performedKey ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20">
+                                <span>Performed Key: {performedKey}</span>
+                                {origKey && origKey.toLowerCase() !== performedKey.toLowerCase() && (
+                                  <span className="text-[10px] font-normal opacity-75">(Orig: {origKey})</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700">
+                                <span>Performed key not set</span>
+                                {origKey && (
+                                  <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">(Orig: {origKey})</span>
+                                )}
+                              </span>
+                            )}
+                            {matched?.bpm ? (
+                              <span className="px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                {matched.bpm} BPM
+                              </span>
+                            ) : null}
+                            {matched?.timeSignature ? (
+                              <span className="px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                {matched.timeSignature}
+                              </span>
+                            ) : null}
+                            {matched?.duration ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span>{matched.duration}</span>
+                              </span>
+                            ) : null}
 
-                        {/* Move Up/Down Controls */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => moveSongUp('worship', idx)}
-                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
-                            title="Move Up"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveSongDown('worship', idx)}
-                            className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
-                            title="Move Down"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                            {matched ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSongForLyrics(matched)}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border transition-colors cursor-pointer ${
+                                    lyricsReady
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                                      : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+                                  }`}
+                                  title={lyricsReady ? 'View or edit song lyrics' : 'Missing lyrics — click to add lyrics to catalog song'}
+                                >
+                                  <BookOpen className="w-3 h-3 shrink-0" />
+                                  <span>{lyricsReady ? 'Lyrics Ready · Edit' : 'Missing Lyrics · Add'}</span>
+                                </button>
+                                {usableCharts.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setChartPreviewTarget({
+                                        song: matched,
+                                        performedKey: performedKey || undefined,
+                                        sectionLabel: `Worship Song ${idx + 1}`
+                                      })
+                                    }
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] border-[#1b75bc]/25 hover:bg-[#1b75bc]/20 dark:hover:bg-[#1b75bc]/30 transition-colors cursor-pointer"
+                                    title={`Open chord & cue charts (${usableCharts.map((c) => CHART_INSTRUMENT_LABELS[c.instrument]).join(', ')})`}
+                                  >
+                                    <Guitar className="w-3 h-3 shrink-0" />
+                                    <span>Charts ({usableCharts.length})</span>
+                                  </button>
+                                )}
+                              </>
+                            ) : slotResolved.isAmbiguous ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>Ambiguous song match</span>
+                              </span>
+                            ) : slotResolved.isStaleId ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>Catalog song not found</span>
+                              </span>
+                            ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => removeWorshipSong(idx)}
-                          className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-rose-500 dark:hover:text-rose-400 rounded transition-colors cursor-pointer shrink-0 ml-auto sm:ml-0"
-                          aria-label="Remove song"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                            {/* Reference Links */}
+                            {links.map((link) => (
+                              <a
+                                key={link.service}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] border transition-colors cursor-pointer ${link.colorClass}`}
+                                title={`Open ${link.label}`}
+                              >
+                                <span>{link.label}</span>
+                                <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Insertion line indicator below item */}
@@ -2822,6 +4014,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         </div>
       </div>
 
+      {/* Setlist Flow & Tempo Dynamics Curve (L-04) */}
+      <TempoDynamicsCurve
+        praiseSongs={praiseSongs}
+        worshipSongs={worshipSongs}
+        praiseSongKeys={praiseSongKeys}
+        worshipSongKeys={worshipSongKeys}
+        praiseSongIds={praiseSongIds}
+        worshipSongIds={worshipSongIds}
+        allSongs={allSongs}
+        transitionNotes={transitionNotes}
+      />
+
       {/* 3. Ministry Assignment Section */}
       <div data-tour="team-assignments-panel" className="p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200/60 dark:border-white/5">
@@ -2836,6 +4040,16 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsAvailabilityModalOpen(true)}
+              className="px-2.5 py-1 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="View and edit team roster availability for this service date"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>Team Availability</span>
+            </button>
+
             <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -3068,19 +4282,35 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                                       const isDA = isMemberUnderDisciplinary(m, serviceDate);
                                       const endDate = m.disciplinaryAction?.endDate;
                                       const daBadge = isDA ? (endDate ? `DA — Ends ${endDate}` : 'DA Active') : undefined;
+
+                                      const avail = AvailabilityService.getAvailability(m.id, serviceDate, serviceType);
+                                      const isUnavailable = avail?.status === 'unavailable';
+                                      const isMaybe = avail?.status === 'maybe';
+                                      const availBadge = isUnavailable
+                                        ? `Unavailable${avail.note ? `: ${avail.note}` : ''}`
+                                        : isMaybe
+                                        ? `Maybe${avail.note ? `: ${avail.note}` : ''}`
+                                        : undefined;
+
                                       const accessibleLabel = isDA
                                         ? `${m.name}. Disciplinary Action. ${endDate ? `Ends ${formatDateDisplayManila(endDate)}` : 'Active'}.`
+                                        : isUnavailable
+                                        ? `${m.name}. Marked Unavailable on ${serviceDate}.`
                                         : m.name;
+
+                                      const descParts: string[] = [];
+                                      if (daBadge) descParts.push(`⚠ ${daBadge}`);
+                                      if (availBadge) descParts.push(`🗓 ${availBadge}`);
+                                      const tagsStr = sortTags(m.labels).join(', ');
+                                      if (tagsStr) descParts.push(tagsStr);
 
                                       return {
                                         value: m.id,
                                         label: m.name,
-                                        isWarning: isDA,
-                                        warningBadge: daBadge,
+                                        isWarning: isDA || isUnavailable,
+                                        warningBadge: daBadge || (isUnavailable ? availBadge : undefined),
                                         accessibleLabel,
-                                        description: isDA
-                                          ? `⚠ ${daBadge} • ${sortTags(m.labels).join(', ')}`
-                                          : sortTags(m.labels).join(', ')
+                                        description: descParts.join(' • ')
                                       };
                                     })
                                   ]}
@@ -3119,6 +4349,32 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                                 </span>
                               </div>
                             )}
+
+                            {/* Warning Indicator for Unavailable Member in Lineup */}
+                            {!isAssignedMemberDA && assignedMemberObj && (() => {
+                              const assignedAvail = AvailabilityService.getAvailability(assignedMemberObj.id, serviceDate, serviceType);
+                              if (assignedAvail?.status !== 'unavailable') return null;
+                              return (
+                                <div
+                                  role="status"
+                                  className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200 text-xs font-semibold animate-in fade-in"
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
+                                    <span className="truncate">
+                                      <span className="font-bold">{assignedMemberObj.name}</span>
+                                      <span className="mx-1 text-amber-400 dark:text-amber-600">•</span>
+                                      <span className="font-normal text-amber-800 dark:text-amber-300">
+                                        Marked Unavailable {assignedAvail.note ? `("${assignedAvail.note}")` : ''}
+                                      </span>
+                                    </span>
+                                  </div>
+                                  <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-200/70 dark:bg-amber-900/70 text-amber-800 dark:text-amber-200 font-bold uppercase tracking-wider">
+                                    Override
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -3154,32 +4410,293 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         </div>
       </div>
 
+      {/* 4. Song Transitions & Flow Section (S-04) */}
+      <div className="p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-white/5">
+          <div className="flex items-center gap-2">
+            <Shuffle className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Song Transitions & Musical Flow ({lineupTransitions.length})
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsTransitionsOpen(!isTransitionsOpen)}
+            className="text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <span>{isTransitionsOpen ? 'Collapse' : 'Expand Flow'}</span>
+            {isTransitionsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {isTransitionsOpen && (
+          <div className="space-y-3">
+            {lineupTransitions.length === 0 ? (
+              <p className="text-xs text-slate-400 dark:text-slate-500 py-3 text-center italic">
+                Add at least two songs to review harmonic transitions, tempo shifts, and enter transition cues for the band.
+              </p>
+            ) : (
+              lineupTransitions.map((trans) => (
+                <div
+                  key={trans.id}
+                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 space-y-2.5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      {trans.sectionLabel}
+                    </span>
+                    <span className="text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 px-2 py-0.5 rounded-md">
+                      {trans.keyTransitionDesc}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-800 dark:text-slate-200">
+                    <span className="font-bold truncate">{trans.fromSong}</span>
+                    <span className="text-slate-400">
+                      ({trans.fromKey || 'Performed key not set'}
+                      {trans.fromBpm ? ` • ${trans.fromBpm} BPM` : ''}
+                      {trans.fromTimeSig ? ` • ${trans.fromTimeSig}` : ''})
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0 mx-1" />
+                    <span className="font-bold truncate">{trans.toSong}</span>
+                    <span className="text-slate-400">
+                      ({trans.toKey || 'Performed key not set'}
+                      {trans.toBpm ? ` • ${trans.toBpm} BPM` : ''}
+                      {trans.toTimeSig ? ` • ${trans.toTimeSig}` : ''})
+                    </span>
+                  </div>
+
+                  <div>
+                    <input
+                      type="text"
+                      value={resolveTransitionNote(
+                        transitionNotes,
+                        trans.section,
+                        trans.fromIdx,
+                        trans.toIdx,
+                        trans.fromSong,
+                        trans.toSong,
+                        trans.fromSongId,
+                        trans.toSongId
+                      )}
+                      onChange={(e) => {
+                        takeSnapshot(false);
+                        const updated = { ...transitionNotes, [trans.id]: e.target.value };
+                        setTransitionNotes(updated);
+                        invalidateTransitionCueChanges();
+                      }}
+                      placeholder="Transition cue (e.g., Acoustic strumming carries over, Prayer before first chorus, Key modulation +2 semitones)..."
+                      className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-[#1b75bc]"
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+        </>
+      )}
+
+      {/* 5. Service Notes & Instructions Section (S-00) */}
+      <div className="p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-white/5">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Service Notes & Order of Service Instructions
+            </h3>
+          </div>
+          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+            {serviceNotes.length} characters • Included in PDF, PNG & Service Brief
+          </span>
+        </div>
+
+        <div>
+          <label htmlFor="service-notes-textarea" className="sr-only">
+            Service Notes and Instructions
+          </label>
+          <textarea
+            id="service-notes-textarea"
+            rows={4}
+            value={serviceNotes}
+            onChange={(e) => {
+              takeSnapshot(false);
+              setServiceNotes(e.target.value);
+              invalidateTransitionCueChanges();
+            }}
+            placeholder="Enter instructions for the worship team, order of service cues, arrival times (e.g. Call time 8:30 AM for soundcheck & prayer), pastoral notes, special prayer segments, or AV/tech reminders..."
+            className="w-full p-3.5 text-xs sm:text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#1b75bc]/40 resize-y"
+          />
+        </div>
+      </div>
+
+      {/* 6. Rehearsal Readiness Checklist Section (S-06) */}
+      {!noService && (
+      <div className="p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-white/5">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Rehearsal Readiness Checklist
+            </h3>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {(() => {
+              const items = [
+                rehearsalChecklist.songSelectionFinalized,
+                rehearsalChecklist.performedKeysChecked,
+                rehearsalChecklist.lyricsReviewed,
+                rehearsalChecklist.referencesChecked,
+                rehearsalChecklist.teamAssignmentsFinalized,
+                rehearsalChecklist.transitionsPrepared
+              ];
+              const completedCount = items.filter((v) => v === true).length;
+              const isAllReady = completedCount === 6;
+
+              return (
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                    isAllReady
+                      ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {isAllReady ? <Check className="w-3.5 h-3.5" /> : null}
+                  <span>{completedCount} of 6 Ready{isAllReady ? ' — Ready for Rehearsal!' : ''}</span>
+                </span>
+              );
+            })()}
+
+            <button
+              type="button"
+              onClick={() => setIsChecklistOpen(!isChecklistOpen)}
+              className="text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>{isChecklistOpen ? 'Collapse' : 'Expand'}</span>
+              {isChecklistOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {isChecklistOpen && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {[
+              {
+                key: 'songSelectionFinalized' as const,
+                label: 'Song selection finalized (Praise & Worship)',
+                desc: 'Praise and worship songs selected, ordered, and ready for service.'
+              },
+              {
+                key: 'performedKeysChecked' as const,
+                label: 'Performed keys confirmed with vocalists & band',
+                desc: 'Keys confirmed for song leader vocal range and band arrangement.'
+              },
+              {
+                key: 'lyricsReviewed' as const,
+                label: 'Lyrics & arrangement verified for projection',
+                desc: 'Stanza order, choruses, and bridges confirmed for lyricist team.'
+              },
+              {
+                key: 'referencesChecked' as const,
+                label: 'Audio & video references attached',
+                desc: 'Spotify, YouTube, or Apple Music reference links attached to songs.'
+              },
+              {
+                key: 'teamAssignmentsFinalized' as const,
+                label: 'Ministry team roster confirmed',
+                desc: 'Song leaders, backup vocalists, musicians, technician, and lyricist confirmed.'
+              },
+              {
+                key: 'transitionsPrepared' as const,
+                label: 'Flow, transitions & service cues documented',
+                desc: 'Musical flow, prayer transitions, and service notes clearly written.'
+              }
+            ].map((checkItem) => {
+              const isChecked = rehearsalChecklist[checkItem.key] === true;
+              return (
+                <label
+                  key={checkItem.key}
+                  className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                    isChecked
+                      ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-300/80 dark:border-emerald-800/60 text-slate-900 dark:text-slate-100'
+                      : 'bg-white dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => {
+                      takeSnapshot(true);
+                      setRehearsalChecklist({
+                        ...rehearsalChecklist,
+                        [checkItem.key]: e.target.checked,
+                        updatedAt: getManilaNowISO()
+                      });
+                    }}
+                    className="w-4 h-4 mt-0.5 rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                  />
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold block">{checkItem.label}</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block">{checkItem.desc}</span>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      )}
+
       {/* Form Action Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-2xl wwcf-glass-card shadow-lg border border-slate-200/80 dark:border-white/10 sticky bottom-4 z-20 backdrop-blur-md">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3.5 sm:p-4 rounded-2xl wwcf-glass-card shadow-xl border border-slate-200/80 dark:border-white/10 sticky bottom-3 sm:bottom-4 z-20 backdrop-blur-md">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           <button
             type="button"
             data-tour="save-lineup-btn"
             onClick={handleSave}
-            className="btn-tactile inline-flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] rounded-xl shadow-md shadow-[#1b75bc]/25 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+            className="btn-tactile inline-flex items-center justify-center gap-2 px-6 py-2.5 min-h-[44px] text-sm font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] rounded-xl shadow-md shadow-[#1b75bc]/25 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] w-full sm:w-auto"
           >
-            <Save className="w-4 h-4" />
+            <Save className="w-4 h-4 shrink-0" />
             <span>Save Schedule</span>
+          </button>
+
+          {/* S-05 Copy Service Brief Button */}
+          <button
+            type="button"
+            onClick={handleCopyServiceBrief}
+            className="btn-tactile inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] text-sm font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/15 hover:bg-emerald-500/20 border border-emerald-500/25 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-500"
+            title="Copy formatted plain-text service brief for team chat (WhatsApp, Messenger, SMS)"
+          >
+            {copiedBrief ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" /> : <Copy className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />}
+            <span>{copiedBrief ? 'Brief Copied!' : 'Copy Brief'}</span>
           </button>
 
           {/* Export Action Buttons - Targeted by Interactive Guide Step 8 */}
           <div
             data-tour="export-buttons-pair"
-            className="inline-flex flex-wrap items-center gap-3"
+            className="flex items-center gap-2 w-full sm:w-auto"
           >
+            <button
+              type="button"
+              onClick={handleExportRehearsalSheet}
+              disabled={isExportingRehearsalSheet}
+              className="btn-tactile flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 py-2.5 min-h-[44px] text-sm font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 dark:bg-amber-500/15 hover:bg-amber-500/20 border border-amber-500/25 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-500 disabled:opacity-50"
+              title="Export print-ready A4 Rehearsal Sheet PDF with complete song keys, tempo, cues, and team roster"
+            >
+              <Printer className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>{isExportingRehearsalSheet ? 'Exporting...' : 'Rehearsal Sheet'}</span>
+            </button>
+
             <button
               type="button"
               data-tour="export-pdf-btn"
               data-guide="export-pdf"
               onClick={handleExportPDF}
-              className="btn-tactile inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 dark:bg-[#1b75bc]/15 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+              className="btn-tactile flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] text-sm font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 dark:bg-[#1b75bc]/15 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
             >
-              <FileDown className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
+              <FileDown className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
               <span>Export PDF</span>
             </button>
 
@@ -3188,9 +4705,9 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
               data-tour="export-png-btn"
               data-guide="export-png"
               onClick={handleExportPNG}
-              className="btn-tactile inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+              className="btn-tactile flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] text-sm font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
             >
-              <Image className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <Image className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
               <span>Export PNG</span>
             </button>
           </div>
@@ -3199,9 +4716,9 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         <button
           type="button"
           onClick={onResetForm}
-          className="btn-tactile inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50/80 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-rose-500"
+          className="btn-tactile inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50/80 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-rose-500 w-full sm:w-auto"
         >
-          <RotateCcw className="w-4 h-4" />
+          <RotateCcw className="w-4 h-4 shrink-0" />
           <span>Reset Form</span>
         </button>
       </div>
@@ -3249,11 +4766,11 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         schedules={schedules}
         excludeScheduleId={editingSchedule?.id}
         onClose={() => setPickerConfig({ ...pickerConfig, isOpen: false })}
-        onSelectSong={(selectedTitle) => {
+        onSelectSong={(selectedTitle, song) => {
           if (pickerConfig.category === 'praise') {
-            handlePraiseChange(pickerConfig.songIndex, selectedTitle);
+            handlePraiseChange(pickerConfig.songIndex, selectedTitle, song);
           } else {
-            handleWorshipChange(pickerConfig.songIndex, selectedTitle);
+            handleWorshipChange(pickerConfig.songIndex, selectedTitle, song);
           }
         }}
         onAddNewSong={() => {
@@ -3271,13 +4788,18 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         }}
       />
 
-      {/* Song Form Modal for adding new song to DB */}
+      {/* Song Form Modal for adding new song or editing matched catalog song lyrics */}
       <SongFormModal
-        isOpen={isSongFormOpen}
-        onClose={() => setIsSongFormOpen(false)}
+        isOpen={isSongFormOpen || Boolean(editingSongForLyrics)}
+        songToEdit={editingSongForLyrics}
+        onClose={() => {
+          setIsSongFormOpen(false);
+          setEditingSongForLyrics(null);
+        }}
         onSave={() => {
           onRefreshSongs();
           setIsSongFormOpen(false);
+          setEditingSongForLyrics(null);
         }}
         showToast={showToast}
       />
@@ -3339,41 +4861,53 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           if (targetCategory === 'praise') {
             const updatedPraise = [...praiseSongs];
             const updatedKeys = [...praiseSongKeys];
+            const updatedIds = [...praiseSongIds];
 
             if (targetIdx !== undefined && targetIdx >= 0 && targetIdx < updatedPraise.length) {
               updatedPraise[targetIdx] = savedSong.title;
               updatedKeys[targetIdx] = songKey;
+              updatedIds[targetIdx] = savedSong.id;
             } else {
               const emptyIdx = updatedPraise.findIndex((s) => !s.trim());
               if (emptyIdx >= 0) {
                 updatedPraise[emptyIdx] = savedSong.title;
                 updatedKeys[emptyIdx] = songKey;
+                updatedIds[emptyIdx] = savedSong.id;
               } else {
                 updatedPraise.push(savedSong.title);
                 updatedKeys.push(songKey);
+                updatedIds.push(savedSong.id);
               }
             }
             setPraiseSongs(updatedPraise);
             setPraiseSongKeys(updatedKeys);
+            setPraiseSongIds(updatedIds);
+            invalidateSongChanges();
           } else {
             const updatedWorship = [...worshipSongs];
             const updatedKeys = [...worshipSongKeys];
+            const updatedIds = [...worshipSongIds];
 
             if (targetIdx !== undefined && targetIdx >= 0 && targetIdx < updatedWorship.length) {
               updatedWorship[targetIdx] = savedSong.title;
               updatedKeys[targetIdx] = songKey;
+              updatedIds[targetIdx] = savedSong.id;
             } else {
               const emptyIdx = updatedWorship.findIndex((s) => !s.trim());
               if (emptyIdx >= 0) {
                 updatedWorship[emptyIdx] = savedSong.title;
                 updatedKeys[emptyIdx] = songKey;
+                updatedIds[emptyIdx] = savedSong.id;
               } else {
                 updatedWorship.push(savedSong.title);
                 updatedKeys.push(songKey);
+                updatedIds.push(savedSong.id);
               }
             }
             setWorshipSongs(updatedWorship);
             setWorshipSongKeys(updatedKeys);
+            setWorshipSongIds(updatedIds);
+            invalidateSongChanges();
           }
         }}
         onSelectExistingForLineup={(existingSong, customKey) => {
@@ -3386,41 +4920,53 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           if (targetCategory === 'praise') {
             const updatedPraise = [...praiseSongs];
             const updatedKeys = [...praiseSongKeys];
+            const updatedIds = [...praiseSongIds];
 
             if (targetIdx !== undefined && targetIdx >= 0 && targetIdx < updatedPraise.length) {
               updatedPraise[targetIdx] = existingSong.title;
               updatedKeys[targetIdx] = songKey;
+              updatedIds[targetIdx] = existingSong.id;
             } else {
               const emptyIdx = updatedPraise.findIndex((s) => !s.trim());
               if (emptyIdx >= 0) {
                 updatedPraise[emptyIdx] = existingSong.title;
                 updatedKeys[emptyIdx] = songKey;
+                updatedIds[emptyIdx] = existingSong.id;
               } else {
                 updatedPraise.push(existingSong.title);
                 updatedKeys.push(songKey);
+                updatedIds.push(existingSong.id);
               }
             }
             setPraiseSongs(updatedPraise);
             setPraiseSongKeys(updatedKeys);
+            setPraiseSongIds(updatedIds);
+            invalidateSongChanges();
           } else {
             const updatedWorship = [...worshipSongs];
             const updatedKeys = [...worshipSongKeys];
+            const updatedIds = [...worshipSongIds];
 
             if (targetIdx !== undefined && targetIdx >= 0 && targetIdx < updatedWorship.length) {
               updatedWorship[targetIdx] = existingSong.title;
               updatedKeys[targetIdx] = songKey;
+              updatedIds[targetIdx] = existingSong.id;
             } else {
               const emptyIdx = updatedWorship.findIndex((s) => !s.trim());
               if (emptyIdx >= 0) {
                 updatedWorship[emptyIdx] = existingSong.title;
                 updatedKeys[emptyIdx] = songKey;
+                updatedIds[emptyIdx] = existingSong.id;
               } else {
                 updatedWorship.push(existingSong.title);
                 updatedKeys.push(songKey);
+                updatedIds.push(existingSong.id);
               }
             }
             setWorshipSongs(updatedWorship);
             setWorshipSongKeys(updatedKeys);
+            setWorshipSongIds(updatedIds);
+            invalidateSongChanges();
           }
         }}
       />
@@ -3465,6 +5011,198 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             This will assign {pendingDaAssignment?.member.name} to this specific lineup as an exceptional assignment. Their DA status and disciplinary record will remain active and intact.
           </p>
         </div>
+      </Modal>
+
+      {/* Service Brief Clipboard Fallback Modal */}
+      <Modal
+        id="scheduler-brief-modal"
+        isOpen={Boolean(briefModalText)}
+        title="Worship Service Brief"
+        confirmLabel="Done"
+        onConfirm={() => setBriefModalText(null)}
+        onClose={() => setBriefModalText(null)}
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            Copy the service brief below to share with the worship team on Messenger, WhatsApp, Telegram, or SMS:
+          </p>
+          <textarea
+            readOnly
+            rows={12}
+            value={briefModalText || ''}
+            className="w-full p-3 font-mono text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl select-all focus:outline-hidden"
+            onFocus={(e) => e.target.select()}
+          />
+        </div>
+      </Modal>
+
+      {/* Reusable Lineup Templates Modal (L-01) */}
+      <LineupTemplatesModal
+        isOpen={isTemplatesModalOpen}
+        onClose={() => setIsTemplatesModalOpen(false)}
+        currentScheduleDraft={getTempSchedule()}
+        members={members}
+        allSongs={allSongs}
+        onApplyTemplate={handleApplyTemplate}
+        showToast={showToast}
+      />
+
+      {/* Team Member Availability Matrix Modal (L-02) */}
+      <MemberAvailabilityModal
+        isOpen={isAvailabilityModalOpen}
+        onClose={() => setIsAvailabilityModalOpen(false)}
+        members={members}
+        initialDate={serviceDate}
+        serviceType={serviceType}
+        showToast={showToast}
+      />
+
+      {/* No Service Confirmation Dialog (NS-01) */}
+      <Modal
+        id="scheduler-no-service-confirm-modal"
+        isOpen={isConfirmNoServiceOpen}
+        title="Mark Date as No Service?"
+        isDanger={true}
+        cancelLabel="Cancel"
+        confirmLabel="Mark as No Service"
+        onConfirm={applyNoServiceEnabled}
+        onClose={() => setIsConfirmNoServiceOpen(false)}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
+            Marking <strong>{serviceType}</strong> on <strong>{formatDateDisplayManila(serviceDate, { month: 'long', day: 'numeric', year: 'numeric' })}</strong> as <strong>No Service</strong> will clear all current songs, performed keys, team assignments, transition notes, and rehearsal checklist items.
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal">
+            Your Service Type, Service Date, and Service Notes will be preserved. You can press Undo (Ctrl+Z) if you need to restore the previous lineup.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Live Rehearsal Prompter Modal (L-09) */}
+      <RehearsalPrompterModal
+        isOpen={isPrompterOpen && !noService}
+        onClose={() => setIsPrompterOpen(false)}
+        schedule={getTempSchedule()}
+        allSongs={allSongs}
+      />
+
+      {/* Lyrics Presentation Console & Audience Output (LY-01) */}
+      <LyricsPresentationModal
+        isOpen={isLyricsPresentationOpen && !noService}
+        onClose={() => setIsLyricsPresentationOpen(false)}
+        schedule={getTempSchedule()}
+        allSongs={allSongs}
+        showToast={showToast}
+      />
+
+      {/* Direct Lineup Song Chord & Cue Chart Modal (HX-01 / HX-02 / HX-04) */}
+      <Modal
+        id="scheduler-song-chart-modal"
+        isOpen={Boolean(chartPreviewTarget) && !noService}
+        title={
+          chartPreviewTarget
+            ? `Chord & Cue Charts: ${allSongs.find((s) => s.id === chartPreviewTarget.song.id)?.title || chartPreviewTarget.song.title}`
+            : 'Chord Charts'
+        }
+        maxWidth="max-w-3xl"
+        onClose={() => setChartPreviewTarget(null)}
+      >
+        {chartPreviewTarget && (() => {
+          const activeSong = allSongs.find((s) => s.id === chartPreviewTarget.song.id) || chartPreviewTarget.song;
+          const origKey = activeSong.originalKey || activeSong.key;
+          return (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-bold text-[#1b75bc] dark:text-[#54b0e2]">
+                    {chartPreviewTarget.sectionLabel}
+                  </span>
+                  <span>·</span>
+                  <span className={chartPreviewTarget.performedKey ? 'font-bold text-slate-900 dark:text-slate-100' : 'italic text-slate-500 dark:text-slate-400'}>
+                    {chartPreviewTarget.performedKey
+                      ? `Performed Key: ${chartPreviewTarget.performedKey}`
+                      : 'Performed key not set'}
+                  </span>
+                  {origKey && <span>· Original Key: {origKey}</span>}
+                  {activeSong.bpm ? <span>· {activeSong.bpm} BPM</span> : null}
+                  {activeSong.timeSignature ? <span>· {activeSong.timeSignature}</span> : null}
+                  {activeSong.tuning ? <span>· Tuning: {activeSong.tuning}</span> : null}
+                </div>
+              </div>
+
+              <ChordChartViewer
+                songTitle={activeSong.title}
+                charts={activeSong.instrumentCharts || []}
+                baseKey={origKey}
+                targetPerformedKey={chartPreviewTarget.performedKey}
+                hasExplicitPerformedKeyContext={true}
+                initialCapo={activeSong.capo}
+                maxHeightClass="max-h-[52vh]"
+              />
+
+              {activeSong.videoMarkers && activeSong.videoMarkers.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs pt-1">
+                  <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400 font-semibold mr-1">
+                    <Youtube className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                    <span>Video Cues:</span>
+                  </span>
+                  {activeSong.videoMarkers.map((marker) => {
+                    const jumpUrl = buildYouTubeTimestampUrl(
+                      activeSong.youtubeUrl,
+                      activeSong.youtubeId,
+                      marker.timeSeconds
+                    );
+                    return jumpUrl ? (
+                      <a
+                        key={marker.id}
+                        href={jumpUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:border-[#1b75bc] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
+                      >
+                        <span className="font-mono font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums">
+                          {formatMarkerTimestamp(marker.timeSeconds)}
+                        </span>
+                        <span>{marker.label}</span>
+                      </a>
+                    ) : (
+                      <span
+                        key={marker.id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                      >
+                        <span className="font-mono font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums">
+                          {formatMarkerTimestamp(marker.timeSeconds)}
+                        </span>
+                        <span>{marker.label}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChartPreviewTarget(null);
+                    setEditingSongForLyrics(activeSong);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-colors cursor-pointer mr-auto"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit Song &amp; Charts</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartPreviewTarget(null)}
+                  className="px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

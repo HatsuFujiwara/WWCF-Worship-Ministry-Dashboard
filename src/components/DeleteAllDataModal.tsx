@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { StorageService } from '../services/storage';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
+import { TemplateService } from '../services/templateService';
+import { AvailabilityService } from '../services/availabilityService';
+import { FamiliarityService } from '../services/familiarityService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import {
@@ -124,19 +127,25 @@ export const DeleteAllDataModal: React.FC<DeleteAllDataModalProps> = ({
       const prevSchedules = StorageService.getSchedulesSync();
       const prevSongs = await SongService.getSongs();
       const prevFamilies = await SongFamilyService.getSongFamilies();
-      const prevDraft = StorageService.getDraftSchedule();
+      const prevTemplates = TemplateService.getTemplatesSync();
+      const prevAvailability = AvailabilityService.getAvailabilityListSync();
+      const prevFamiliarity = FamiliarityService.getFamiliarityListSync();
+      const prevDraft = StorageService.getDraftScheduleSync();
 
       await StorageService.deleteAllData();
 
       LineupHistoryService.pushAppAction({
         description: 'Purged all application data',
         undo: async () => {
-          StorageService.saveMembers(prevMembers);
-          StorageService.saveLabels(prevLabels);
-          StorageService.saveSchedules(prevSchedules);
+          StorageService.saveMembersChecked(prevMembers);
+          StorageService.saveLabelsChecked(prevLabels);
+          StorageService.saveSchedulesChecked(prevSchedules);
           await SongService.saveSongsList(prevSongs);
           await SongFamilyService.saveSongFamilies(prevFamilies);
-          StorageService.saveDraftSchedule(prevDraft);
+          TemplateService.saveTemplatesSync(prevTemplates);
+          AvailabilityService.saveAvailabilityListSync(prevAvailability);
+          FamiliarityService.saveFamiliarityListSync(prevFamiliarity);
+          StorageService.saveDraftScheduleChecked(prevDraft);
           onDataDeleted();
         },
         redo: async () => {

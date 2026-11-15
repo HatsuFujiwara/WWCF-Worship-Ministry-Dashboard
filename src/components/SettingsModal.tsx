@@ -108,6 +108,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   showToast
 }) => {
   const [guideMode, setGuideMode] = useState<GuideAutoShowMode>('first_visit');
+  const [settingsCategory, setSettingsCategory] = useState<
+    'all' | 'general' | 'cloud' | 'accessibility' | 'shortcuts' | 'data'
+  >('all');
   const [accessibility, setAccessibility] = useState<AccessibilitySettings>(() =>
     StorageService.getAccessibilitySettings()
   );
@@ -174,6 +177,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setGoogleStatus(state.status);
       setGoogleProfile(state.profile);
       setGoogleLastSync(state.lastSyncedAt);
+      const acctKey = GoogleAuthService.getAccountKey();
+      setAutoCloudSync(StorageService.getAutoCloudSync(acctKey || undefined));
+      setIncludeDraftCloud(StorageService.getIncludeDraftInCloudBackup(acctKey || undefined));
     });
     return unsubscribe;
   }, []);
@@ -359,14 +365,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleToggleAutoCloudSync = (enabled: boolean) => {
+    const acctKey = GoogleAuthService.getAccountKey();
+    if (!acctKey) {
+      showToast?.('Please connect your Google Account first.', 'info');
+      return;
+    }
     setAutoCloudSync(enabled);
-    StorageService.setAutoCloudSync(enabled);
+    StorageService.setAutoCloudSync(enabled, acctKey);
     showToast?.(
       enabled
-        ? 'Automatic Cloud Backup enabled. Changes will be saved in the background.'
+        ? 'Automatic Cloud Backup enabled for this account. Changes will be saved in the background.'
         : 'Automatic Cloud Backup disabled. Use "Save to Drive" for manual backups.',
       'info'
     );
+  };
+
+  const handleToggleIncludeDraft = (enabled: boolean) => {
+    const acctKey = GoogleAuthService.getAccountKey();
+    if (!acctKey) {
+      showToast?.('Please connect your Google Account first.', 'info');
+      return;
+    }
+    setIncludeDraftCloud(enabled);
+    StorageService.setIncludeDraftInCloudBackup(enabled, acctKey);
+    showToast?.(
+      enabled
+        ? 'Lineup draft will now be included in cloud backup.'
+        : 'Lineup draft excluded from cloud backup.',
+      'info'
+    );
+  };
+
+  const handleSwitchGoogleAccount = async () => {
+    setIsSyncingGoogle(true);
+    try {
+      await GoogleAuthService.switchAccount('drive');
+      showToast?.('Switched Google Account successfully.', 'success');
+    } catch (err: any) {
+      showToast?.(err?.message || 'Failed to switch Google account', 'danger');
+    } finally {
+      setIsSyncingGoogle(false);
+    }
   };
 
   const handleDisconnectGoogle = () => {
@@ -830,6 +869,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setOpenSection(openSection === cat ? null : cat);
   };
 
+  const showGeneral = settingsCategory === 'all' || settingsCategory === 'general';
+  const showCloud = settingsCategory === 'all' || settingsCategory === 'cloud';
+  const showAccessibility = settingsCategory === 'all' || settingsCategory === 'accessibility';
+  const showShortcuts = settingsCategory === 'all' || settingsCategory === 'shortcuts';
+  const showData = settingsCategory === 'all' || settingsCategory === 'data';
+
   if (!isOpen) return null;
 
   const modalContent = (
@@ -878,10 +923,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
+        {/* Category Wayfinding Tab Bar */}
+        <div className="flex items-center gap-1.5 px-5 sm:px-6 py-2.5 border-b border-slate-100 dark:border-white/10 bg-slate-50/80 dark:bg-black/60 overflow-x-auto text-xs shrink-0">
+          {[
+            { id: 'all', label: 'All Settings' },
+            { id: 'general', label: 'Appearance & Layout' },
+            { id: 'cloud', label: 'Cloud Sync' },
+            { id: 'accessibility', label: 'Accessibility' },
+            { id: 'shortcuts', label: 'Shortcuts' },
+            { id: 'data', label: 'Data & Storage' }
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setSettingsCategory(cat.id as any)}
+              className={`py-1.5 px-3 rounded-lg font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                settingsCategory === cat.id
+                  ? 'bg-[#1b75bc] text-white shadow-xs'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
         {/* Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
-          {/* Section: Appearance / Theme */}
-          <div data-tour="theme-toggle" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5">
+          {/* Section: Appearance & Navigation */}
+          {showGeneral && (
+            <>
+              <div data-tour="theme-toggle" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                 {isDarkMode ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
@@ -1103,9 +1175,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
           </div>
+        </>
+      )}
 
           {/* Section: Keyboard Shortcuts */}
-          <div data-tour="keyboard-shortcuts-settings" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-3">
+          {showShortcuts && (
+            <div data-tour="keyboard-shortcuts-settings" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                 <Keyboard className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
@@ -1269,8 +1344,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
           </div>
+        )}
 
-          {/* Section: Accessibility (7 Compact Categories) */}
+        {/* Section: Accessibility (7 Compact Categories) */}
+        {showAccessibility && (
           <div data-tour="accessibility-panel" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
@@ -1637,8 +1714,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           </div>
+        )}
 
-          {/* Section: Interactive Guide Preferences */}
+        {/* Section: Interactive Guide Preferences */}
+        {showGeneral && (
           <div data-tour="guide-preferences" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5">
             <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <Play className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
@@ -1695,9 +1774,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </div>
+        )}
 
-          {/* Section: Google Account & Cloud Backup */}
-          <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+        {/* Section: Google Account & Cloud Backup + YouTube API Key */}
+        {showCloud && (
+          <>
+            <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
                 <Cloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
@@ -1748,14 +1830,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleDisconnectGoogle}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
-                    title="Disconnect Google Account"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSwitchGoogleAccount}
+                      disabled={isSyncingGoogle}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
+                      title="Switch Google Account"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDisconnectGoogle}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                      title="Disconnect Google Account"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Scope authorization & Last Save Info */}
@@ -1857,17 +1950,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="shrink-0 pt-0.5">
                       <Switch
                         checked={includeDraftCloud}
-                        onChange={() => {
-                          const next = !includeDraftCloud;
-                          setIncludeDraftCloud(next);
-                          StorageService.setIncludeDraftInCloudBackup(next);
-                          showToast?.(
-                            next
-                              ? 'Lineup draft will now be included in cloud backup.'
-                              : 'Lineup draft excluded from cloud backup.',
-                            'info'
-                          );
-                        }}
+                        onChange={() => handleToggleIncludeDraft(!includeDraftCloud)}
                         label="Include Lineup Draft in Cloud Backup"
                       />
                     </div>
@@ -2047,9 +2130,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           </div>
+        </>
+      )}
 
-          {/* Section: Data Management Tools */}
-          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
+      {/* Section: Data Management Tools */}
+      {showData && (
+        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
             <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <Database className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               Data & Synchronization
@@ -2099,9 +2185,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Footer */}
+      {/* Footer */}
         <div className="flex items-center justify-end px-6 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
           <button
             type="button"

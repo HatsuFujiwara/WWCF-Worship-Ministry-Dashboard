@@ -2,6 +2,7 @@ import { Schedule, ServiceType, Song, SongFamily } from '../types';
 import { getManilaTodayString, getManilaDateParts, addDaysToDateString, getManilaNowISO } from './dateUtils';
 import { isSpecialEvent, isFirstWeekOfMonth, getLastWeekOfPreviousMonthRange } from './recommendationUtils';
 import { SongService } from '../services/songService';
+import { resolveSlotSong } from './songResolveUtils';
 
 export interface RepeatedOccurrence {
   scheduleId: string;
@@ -13,6 +14,42 @@ export interface RepeatedSongDetail {
   songTitle: string;
   usageCount: number;
   otherOccurrences: RepeatedOccurrence[];
+}
+
+export type ScheduleStatus = 'no_service' | 'empty' | 'populated';
+
+/**
+ * Explicit check for No Service records. Never infers No Service from an empty schedule.
+ */
+export function isNoServiceSchedule(schedule?: Partial<Schedule> | null): boolean {
+  return Boolean(schedule?.noService === true);
+}
+
+/**
+ * Checks whether a schedule is an empty scheduled/placeholder lineup (0 songs and NOT No Service).
+ */
+export function isScheduleEmpty(schedule?: Partial<Schedule> | null): boolean {
+  if (!schedule) return true;
+  if (isNoServiceSchedule(schedule)) return false;
+  const praiseCount = (schedule.praiseSongs || []).filter((s) => Boolean(s.trim())).length;
+  const worshipCount = (schedule.worshipSongs || []).filter((s) => Boolean(s.trim())).length;
+  return praiseCount + worshipCount === 0;
+}
+
+/**
+ * Checks whether a schedule is a conducted/planned service with at least 1 song and NOT No Service.
+ */
+export function isPopulatedSchedule(schedule?: Partial<Schedule> | null): boolean {
+  return !isNoServiceSchedule(schedule) && !isScheduleEmpty(schedule);
+}
+
+/**
+ * Returns the explicit 3-state classification for any schedule record.
+ */
+export function getScheduleStatus(schedule?: Partial<Schedule> | null): ScheduleStatus {
+  if (isNoServiceSchedule(schedule)) return 'no_service';
+  if (isScheduleEmpty(schedule)) return 'empty';
+  return 'populated';
 }
 
 export function getPreviousMonthString(ym: string): string {
@@ -35,7 +72,7 @@ export function getLastRegularSchedulesOfPreviousMonth(
   const prevMonthStr = getPreviousMonthString(currentMonthStr);
 
   const prevSchedules = allSchedules.filter(
-    (s) => s.serviceDate && s.serviceDate.slice(0, 7) === prevMonthStr
+    (s) => !isNoServiceSchedule(s) && s.serviceDate && s.serviceDate.slice(0, 7) === prevMonthStr
   );
 
   const prevSundays = prevSchedules
@@ -68,6 +105,7 @@ export function isFirstRegularServiceOfMonth(
 
   const sameTypeSchedules = allSchedules.filter(
     (s) =>
+      !isNoServiceSchedule(s) &&
       s.serviceDate &&
       s.serviceDate.slice(0, 7) === targetMonth &&
       s.serviceType === targetServiceType
@@ -90,9 +128,131 @@ export function isFirstRegularServiceOfMonth(
   return sameTypeSchedules[0].serviceDate === targetServiceDate;
 }
 
+function getScheduleSlotIdentityKey(
+  rawTitle: string,
+  slotId: string | undefined,
+  songs: Song[],
+  families: SongFamily[]
+): {
+  key: string;
+  displayTitle: string;
+  familyId?: string;
+  familySongIds: Set<string>;
+  familyNameLower?: string;
+  matchedSongId?: string;
+  staleId?: string;
+  isAmbiguous: boolean;
+  cleanLower: string;
+} {
+  const cleanTitle = (rawTitle || '').trim();
+  const cleanLower = cleanTitle.toLowerCase();
+  const cleanId = (slotId || '').trim();
+  const resolved = resolveSlotSong(cleanTitle, cleanId, songs);
+
+  if (resolved.isStaleId) {
+    return {
+      key: `stale:${cleanId}`,
+      displayTitle: cleanTitle || 'Song unavailable',
+      familySongIds: new Set<string>(),
+      staleId: cleanId,
+      isAmbiguous: false,
+      cleanLower
+    };
+  }
+
+  if (resolved.song) {
+    const matched = resolved.song;
+    const fam =
+      (matched.songFamilyId
+        ? families.find((f) => f.id === matched.songFamilyId)
+        : undefined) ||
+      families.find(
+        (f) =>
+          (f.versionIds && f.versionIds.includes(matched.id)) ||
+          (f.versions && f.versions.some((v) => v.songId === matched.id))
+      );
+
+    if (fam) {
+      const memberIds = new Set<string>(fam.versionIds || []);
+      if (fam.versions) {
+        fam.versions.forEach((v) => {
+          if (v.songId) memberIds.add(v.songId);
+        });
+      }
+      songs.forEach((s) => {
+        if (s.songFamilyId === fam.id) memberIds.add(s.id);
+      });
+      return {
+        key: `fam:${fam.id}`,
+        displayTitle: cleanTitle || matched.title,
+        familyId: fam.id,
+        familySongIds: memberIds,
+        familyNameLower: fam.name?.trim().toLowerCase(),
+        matchedSongId: matched.id,
+        isAmbiguous: false,
+        cleanLower
+      };
+    }
+
+    return {
+      key: `song:${matched.id}`,
+      displayTitle: cleanTitle || matched.title,
+      familySongIds: new Set<string>([matched.id]),
+      matchedSongId: matched.id,
+      isAmbiguous: false,
+      cleanLower
+    };
+  }
+
+  if (resolved.isAmbiguous) {
+    return {
+      key: `ambiguous:${cleanLower}`,
+      displayTitle: cleanTitle,
+      familySongIds: new Set<string>(),
+      isAmbiguous: true,
+      cleanLower
+    };
+  }
+
+  // Legacy unlinked title (no ID, not in catalog): check unique Song Family name
+  if (cleanLower) {
+    const famsByName = families.filter((f) => f.name.trim().toLowerCase() === cleanLower);
+    if (famsByName.length === 1) {
+      const fam = famsByName[0];
+      const memberIds = new Set<string>(fam.versionIds || []);
+      if (fam.versions) {
+        fam.versions.forEach((v) => {
+          if (v.songId) memberIds.add(v.songId);
+        });
+      }
+      songs.forEach((s) => {
+        if (s.songFamilyId === fam.id) memberIds.add(s.id);
+      });
+      return {
+        key: `fam:${fam.id}`,
+        displayTitle: cleanTitle,
+        familyId: fam.id,
+        familySongIds: memberIds,
+        familyNameLower: fam.name.trim().toLowerCase(),
+        isAmbiguous: false,
+        cleanLower
+      };
+    }
+  }
+
+  return {
+    key: `unlinked:${cleanLower}`,
+    displayTitle: cleanTitle,
+    familySongIds: new Set<string>(),
+    isAmbiguous: false,
+    cleanLower
+  };
+}
+
 /**
  * First-Come, First-Serve Repeated Song Detection with Cross-Month Carry-Over.
- * Fully Song Family aware: treats all members of the same Song Family as the same song composition.
+ * Fully Song Family and ID-authoritative: treats all members of the same Song Family as the same song composition,
+ * while never falling back to title matching on stale IDs or merging distinct same-title songs.
  */
 export function getScheduleRepeatedSongs(
   targetSchedule: Schedule,
@@ -100,31 +260,51 @@ export function getScheduleRepeatedSongs(
   allSongs?: Song[],
   allFamilies?: SongFamily[]
 ): RepeatedSongDetail[] {
-  if (!targetSchedule.serviceDate) return [];
+  if (!targetSchedule.serviceDate || isNoServiceSchedule(targetSchedule)) return [];
   const targetMonth = targetSchedule.serviceDate.slice(0, 7); // "YYYY-MM"
 
-  // Collect all songs in target schedule
-  const targetSongs = [
-    ...(targetSchedule.praiseSongs || []),
-    ...(targetSchedule.worshipSongs || []),
-  ]
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (targetSongs.length === 0) return [];
-
-  // Deduplicate target songs by lowercase key, preserving original casing
-  const songTitleMap = new Map<string, string>();
-  for (const song of targetSongs) {
-    const key = song.toLowerCase();
-    if (!songTitleMap.has(key)) {
-      songTitleMap.set(key, song);
+  const songs: Song[] = allSongs ?? (typeof localStorage !== 'undefined' ? SongService.getSongsSync() : []);
+  let families: SongFamily[] = allFamilies ?? [];
+  if (!allFamilies && typeof localStorage !== 'undefined') {
+    try {
+      const famData = localStorage.getItem('wwcf_song_families_v1');
+      families = famData ? JSON.parse(famData) : [];
+    } catch {
+      families = [];
     }
   }
 
-  // Get all saved schedules in the same month that have a serviceDate
+  // Collect all song slots in target schedule preserving slot IDs
+  const targetSlots: { title: string; songId?: string }[] = [];
+  (targetSchedule.praiseSongs || []).forEach((rawTitle, idx) => {
+    const title = (rawTitle || '').trim();
+    const songId = targetSchedule.praiseSongIds?.[idx];
+    if (title || (songId && songId.trim())) {
+      targetSlots.push({ title, songId });
+    }
+  });
+  (targetSchedule.worshipSongs || []).forEach((rawTitle, idx) => {
+    const title = (rawTitle || '').trim();
+    const songId = targetSchedule.worshipSongIds?.[idx];
+    if (title || (songId && songId.trim())) {
+      targetSlots.push({ title, songId });
+    }
+  });
+
+  if (targetSlots.length === 0) return [];
+
+  // Deduplicate target slots by canonical ID/family identity key
+  const targetScopeMap = new Map<string, ReturnType<typeof getScheduleSlotIdentityKey>>();
+  for (const slot of targetSlots) {
+    const scope = getScheduleSlotIdentityKey(slot.title, slot.songId, songs, families);
+    if (!targetScopeMap.has(scope.key)) {
+      targetScopeMap.set(scope.key, scope);
+    }
+  }
+
+  // Get all saved schedules in the same month that have a serviceDate (excluding No Service)
   const monthSchedules = allSchedules.filter(
-    (s) => s.serviceDate && s.serviceDate.slice(0, 7) === targetMonth
+    (s) => !isNoServiceSchedule(s) && s.serviceDate && s.serviceDate.slice(0, 7) === targetMonth
   );
 
   // Check if targetSchedule is in the first week of the month (day 1..7)
@@ -132,7 +312,7 @@ export function getScheduleRepeatedSongs(
   if (isFirstWeekOfMonth(targetSchedule.serviceDate)) {
     const range = getLastWeekOfPreviousMonthRange(targetSchedule.serviceDate);
     extraPrevWeekSchedules = allSchedules.filter(
-      (s) => s.serviceDate && s.serviceDate >= range.startDate && s.serviceDate <= range.endDate
+      (s) => !isNoServiceSchedule(s) && s.serviceDate && s.serviceDate >= range.startDate && s.serviceDate <= range.endDate
     );
   } else if (
     isFirstRegularServiceOfMonth(
@@ -171,19 +351,28 @@ export function getScheduleRepeatedSongs(
 
   const repeatedDetails: RepeatedSongDetail[] = [];
 
-  for (const [, originalTitle] of songTitleMap.entries()) {
-    // Song Family aware: Retrieve all song titles that share the same composition/family
-    const familyTitles = new Set(
-      SongService.getFamilySongTitles(originalTitle, allSongs, allFamilies)
-    );
+  for (const targetScope of targetScopeMap.values()) {
+    const slotMatchesTarget = (candTitle: string, candId?: string): boolean => {
+      const cleanCandTitle = (candTitle || '').trim();
+      const cleanCandId = (candId || '').trim();
+      if (!cleanCandTitle && !cleanCandId) return false;
+      const candScope = getScheduleSlotIdentityKey(cleanCandTitle, cleanCandId, songs, families);
 
-    // Find all schedules in evaluation list containing this song or any of its family members
+      // Exact canonical key match (handles stale:X === stale:X, fam:F === fam:F, song:S === song:S, ambiguous:T === ambiguous:T, unlinked:T === unlinked:T)
+      if (candScope.key === targetScope.key) return true;
+
+      // Cross-check if target is a family and candidate resolved to a song ID inside the family
+      if (targetScope.familyId && candScope.matchedSongId && targetScope.familySongIds.has(candScope.matchedSongId)) {
+        return true;
+      }
+
+      return false;
+    };
+
     const containingSchedules = fullListToEvaluate.filter((s) => {
-      const songs = [
-        ...(s.praiseSongs || []),
-        ...(s.worshipSongs || []),
-      ].map((song) => song.trim().toLowerCase());
-      return songs.some((schSong) => familyTitles.has(schSong));
+      const praiseMatch = (s.praiseSongs || []).some((t, idx) => slotMatchesTarget(t, s.praiseSongIds?.[idx]));
+      if (praiseMatch) return true;
+      return (s.worshipSongs || []).some((t, idx) => slotMatchesTarget(t, s.worshipSongIds?.[idx]));
     });
 
     if (containingSchedules.length <= 1) {
@@ -218,7 +407,7 @@ export function getScheduleRepeatedSongs(
       }));
 
     repeatedDetails.push({
-      songTitle: originalTitle,
+      songTitle: targetScope.displayTitle,
       usageCount: otherOccurrences.length,
       otherOccurrences,
     });
@@ -358,15 +547,6 @@ export function getSmartInitialServiceDetails(
     serviceType: 'Sunday Service',
     serviceDate: nextSunday
   };
-}
-
-/**
- * Checks whether a schedule contains 0 songs.
- */
-export function isScheduleEmpty(schedule: Schedule): boolean {
-  const praiseCount = (schedule.praiseSongs || []).filter((s) => Boolean(s.trim())).length;
-  const worshipCount = (schedule.worshipSongs || []).filter((s) => Boolean(s.trim())).length;
-  return praiseCount + worshipCount === 0;
 }
 
 /**

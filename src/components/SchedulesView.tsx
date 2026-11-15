@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, formatAssignmentMemberNames, Song, normalizeServiceType } from '../types';
-import { getScheduleRepeatedSongs, ensureMonthlyPlaceholders, isScheduleEmpty } from '../utils/scheduleUtils';
+import { getScheduleRepeatedSongs, ensureMonthlyPlaceholders, getScheduleStatus, isNoServiceSchedule } from '../utils/scheduleUtils';
 import { formatDateDisplayManila, getManilaTodayString, getManilaDateParts } from '../utils/dateUtils';
 import { resolveScheduleSongTitles } from '../utils/songResolveUtils';
 import { StorageService } from '../services/storage';
@@ -20,7 +20,8 @@ import {
   ArrowUpDown,
   Calendar,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Ban
 } from 'lucide-react';
 
 export const MONTH_OPTIONS = [
@@ -94,6 +95,23 @@ export type ScheduleSortOption =
 const LineupSongsPreview: React.FC<{ schedule: Schedule; songsList?: Song[] }> = ({ schedule, songsList = [] }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  if (isNoServiceSchedule(schedule)) {
+    const reason = schedule.noServiceReason?.trim();
+    return (
+      <div className="py-1 space-y-1">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300">
+          <Ban className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span>No Service Scheduled</span>
+        </div>
+        {reason && (
+          <p className="text-xs text-slate-600 dark:text-slate-300 break-words">
+            Reason: {reason}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   const resolved = resolveScheduleSongTitles(schedule, songsList);
 
   const praiseList = resolved.praiseSongs
@@ -127,17 +145,17 @@ const LineupSongsPreview: React.FC<{ schedule: Schedule; songsList?: Song[] }> =
   const hiddenCount = previewSongs.length - limit;
 
   return (
-    <div className="space-y-1 py-1">
-      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+    <div className="space-y-1.5 py-1">
+      <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1">
         <span>Songs ({previewSongs.length})</span>
       </div>
-      <ul className="space-y-0.5 text-xs text-slate-800 dark:text-slate-200 font-medium">
+      <ul className="space-y-1 text-xs text-slate-800 dark:text-slate-200 font-medium">
         {visibleSongs.map((song, idx) => (
           <li key={idx} className="flex items-center gap-1.5 truncate">
-            <span className="text-indigo-500 dark:text-indigo-400 font-bold">•</span>
+            <span className="text-[#1b75bc] dark:text-[#54b0e2] font-black">•</span>
             <span className="truncate font-medium">{song.title}</span>
             {song.key && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 font-bold shrink-0">
+              <span className="text-xs px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-[#1b75bc] dark:text-[#54b0e2] border border-blue-200/60 dark:border-blue-800/60 font-bold shrink-0">
                 Key: {song.key}
               </span>
             )}
@@ -148,10 +166,10 @@ const LineupSongsPreview: React.FC<{ schedule: Schedule; songsList?: Song[] }> =
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer pt-0.5 inline-flex items-center gap-0.5"
+          className="text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] hover:underline cursor-pointer pt-0.5 inline-flex items-center gap-1 min-h-[30px]"
         >
           <span>{isExpanded ? 'Show Less' : `+${hiddenCount} More Songs (Show More)`}</span>
-          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
       )}
     </div>
@@ -180,6 +198,9 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
   const [serviceFilter, setServiceFilter] = useState<string>(savedFilters.serviceFilter || 'all');
   const [yearFilter, setYearFilter] = useState<string>(() => savedFilters.yearFilter || defaultYear);
   const [monthFilter, setMonthFilter] = useState<string>(() => savedFilters.monthFilter || defaultMonth);
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
+  const [showDateRange, setShowDateRange] = useState<boolean>(false);
   const [sortOption, setSortOption] = useState<ScheduleSortOption>(() => {
     if (savedFilters.sortOption) return savedFilters.sortOption as ScheduleSortOption;
     try {
@@ -294,25 +315,45 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
         }
       }
 
+      // Date range filter
+      if (startDateFilter && s.serviceDate && s.serviceDate < startDateFilter) {
+        return false;
+      }
+      if (endDateFilter && s.serviceDate && s.serviceDate > endDateFilter) {
+        return false;
+      }
+
       // Search query
       if (query) {
         const cleanQ = query.replace(/\s+/g, ' ');
         const terms = cleanQ.split(' ');
         const serviceLower = s.serviceType.toLowerCase();
         const dateLower = (s.serviceDate || '').toLowerCase();
+        const notesLower = (s.notes || '').toLowerCase();
+        const noServiceLower = isNoServiceSchedule(s)
+          ? `no service ${(s.noServiceReason || '').toLowerCase()}`
+          : '';
+        const transitionCuesLower = Object.values(s.transitionNotes || {}).map((c) => c.toLowerCase());
         const resolved = resolveScheduleSongTitles(s, allSongs);
         const praiseLower = (resolved.praiseSongs || []).map((p) => p.toLowerCase());
         const worshipLower = (resolved.worshipSongs || []).map((w) => w.toLowerCase());
+        const keysLower = (s.praiseSongKeys || [])
+          .concat(s.worshipSongKeys || [])
+          .map((k) => (k || '').toLowerCase());
         const membersLower = (s.ministryAssignments || []).map(
-          (m) => (formatAssignmentMemberNames(m) + ' ' + m.role).toLowerCase()
+          (m) => (formatAssignmentMemberNames(m) + ' ' + m.role + ' ' + (m.notes || '')).toLowerCase()
         );
 
         return terms.every(
           (term) =>
             serviceLower.includes(term) ||
             dateLower.includes(term) ||
+            notesLower.includes(term) ||
+            noServiceLower.includes(term) ||
+            transitionCuesLower.some((c) => c.includes(term)) ||
             praiseLower.some((p) => p.includes(term)) ||
             worshipLower.some((w) => w.includes(term)) ||
+            keysLower.some((k) => k.includes(term)) ||
             membersLower.some((m) => m.includes(term))
         );
       }
@@ -332,12 +373,16 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
       if (comp !== 0) return comp;
       return (b.id || '').localeCompare(a.id || '');
     });
-  }, [schedules, searchQuery, serviceFilter, yearFilter, monthFilter, sortOption, allSongs]);
+  }, [schedules, searchQuery, serviceFilter, yearFilter, monthFilter, startDateFilter, endDateFilter, sortOption, allSongs]);
 
   // Context-aware empty state messaging
   const getEmptyMessage = () => {
     if (searchQuery.trim()) {
       return `No line-ups matching "${searchQuery.trim()}".`;
+    }
+
+    if (startDateFilter || endDateFilter) {
+      return 'No saved line-ups found in the selected date range.';
     }
 
     const selectedMonthObj = MONTH_OPTIONS.find((m) => m.value === monthFilter);
@@ -363,6 +408,8 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
     serviceFilter !== 'all' ||
     yearFilter !== 'all' ||
     monthFilter !== 'all' ||
+    startDateFilter !== '' ||
+    endDateFilter !== '' ||
     sortOption !== 'date-desc';
 
   const handleResetFilters = () => {
@@ -370,6 +417,8 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
     setServiceFilter('all');
     setYearFilter('all');
     setMonthFilter('all');
+    setStartDateFilter('');
+    setEndDateFilter('');
     setSortOption('date-desc');
   };
 
@@ -471,7 +520,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8] shrink-0" />
             <div className="flex-1">
-              <label htmlFor="year-filter-select" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              <label htmlFor="year-filter-select" className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 Year Filter
               </label>
               <select
@@ -479,7 +528,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                 value={yearFilter}
                 data-tour="schedules-year-select"
                 onChange={(e) => setYearFilter(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/80 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer btn-press-feedback"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer min-h-[40px] btn-press-feedback"
               >
                 <option value="all">All Years</option>
                 {availableYears.map((yr) => (
@@ -495,7 +544,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
           <div className="flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8] shrink-0" />
             <div className="flex-1">
-              <label htmlFor="month-filter-select" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              <label htmlFor="month-filter-select" className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 Month Filter
               </label>
               <select
@@ -503,7 +552,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                 value={monthFilter}
                 data-tour="schedules-month-select"
                 onChange={(e) => setMonthFilter(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/80 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer btn-press-feedback"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer min-h-[40px] btn-press-feedback"
               >
                 {MONTH_OPTIONS.map((m) => (
                   <option key={m.value} value={m.value}>
@@ -518,7 +567,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8] shrink-0" />
             <div className="flex-1">
-              <label htmlFor="service-filter-select" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              <label htmlFor="service-filter-select" className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 Service Type Filter
               </label>
               <select
@@ -526,7 +575,7 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                 value={serviceFilter}
                 data-tour="schedules-filter-select"
                 onChange={(e) => setServiceFilter(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/80 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer btn-press-feedback"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer min-h-[40px] btn-press-feedback"
               >
                 <option value="all">All Services</option>
                 {availableServices.map((st) => (
@@ -542,21 +591,67 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
           <div className="flex items-center gap-2">
             <ArrowUpDown className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8] shrink-0" />
             <div className="flex-1">
-              <label htmlFor="sort-filter-select" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              <label htmlFor="sort-filter-select" className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                 Sort By
               </label>
               <select
                 id="sort-filter-select"
                 value={sortOption}
-                data-tour="schedules-sort-select"
                 onChange={(e) => handleSortChange(e.target.value as ScheduleSortOption)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/80 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer btn-press-feedback"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/30 outline-none cursor-pointer min-h-[40px] btn-press-feedback"
               >
-                <option value="date-desc">Newest Date → Oldest Date (Default)</option>
-                <option value="date-asc">Oldest Date → Newest Date</option>
+                <option value="date-desc">Newest Date First</option>
+                <option value="date-asc">Oldest Date First</option>
               </select>
             </div>
           </div>
+        </div>
+
+        {/* Date Range Filter Options */}
+        <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-white/5 text-xs">
+          <button
+            type="button"
+            onClick={() => setShowDateRange((prev) => !prev)}
+            className="text-xs font-semibold text-[#1b75bc] dark:text-[#5aa7e8] hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>{showDateRange ? 'Hide Custom Date Range' : 'Filter by Exact Date Range'}</span>
+          </button>
+
+          {showDateRange && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">From:</span>
+                <input
+                  type="date"
+                  value={startDateFilter}
+                  onChange={(e) => setStartDateFilter(e.target.value)}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">To:</span>
+                <input
+                  type="date"
+                  value={endDateFilter}
+                  onChange={(e) => setEndDateFilter(e.target.value)}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 outline-none"
+                />
+              </div>
+              {(startDateFilter || endDateFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDateFilter('');
+                    setEndDateFilter('');
+                  }}
+                  className="text-[11px] text-rose-500 hover:underline cursor-pointer"
+                >
+                  Clear Range
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -701,15 +796,15 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-800/30">
-                  <th className="py-3 px-3 w-10 text-center" aria-label="Row selection"></th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Service</th>
-                  <th className="py-3 px-4 min-w-[240px]">Songs</th>
-                  <th className="py-3 px-4">Key Roles</th>
+                <tr className="border-b border-slate-100 dark:border-white/10 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider bg-slate-50/80 dark:bg-black/60">
+                  <th className="py-3.5 px-3 w-10 text-center" aria-label="Row selection"></th>
+                  <th className="py-3.5 px-4">Date</th>
+                  <th className="py-3.5 px-4">Service</th>
+                  <th className="py-3.5 px-4 min-w-[240px]">Songs</th>
+                  <th className="py-3.5 px-4">Key Roles</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                 {filteredSchedules.map((schedule, idx) => {
                   const selected = isSelected(schedule.id);
                   const leaderAssignments = (schedule.ministryAssignments || []).filter(
@@ -719,16 +814,18 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                     .map((m) => formatAssignmentMemberNames(m))
                     .filter((n) => Boolean(n) && n !== 'Unassigned' && n !== '—')
                     .join(', ');
-                  const repeatedSongs = getScheduleRepeatedSongs(schedule, schedules, allSongs);
-                  const isEmpty = isScheduleEmpty(schedule);
+                  const status = getScheduleStatus(schedule);
+                  const repeatedSongs = status === 'populated' ? getScheduleRepeatedSongs(schedule, schedules, allSongs) : [];
+                  const isEmpty = status === 'empty';
+                  const isNoService = status === 'no_service';
 
                   return (
                     <tr
                       key={schedule.id}
                       className={`transition-colors ${
                         selected
-                          ? 'bg-indigo-50/40 dark:bg-indigo-950/30'
-                          : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                          ? 'bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20'
+                          : 'hover:bg-slate-50/60 dark:hover:bg-white/5'
                       }`}
                     >
                       <td className="py-4 px-3 text-center">
@@ -736,26 +833,33 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                           type="checkbox"
                           checked={selected}
                           onChange={(e) => toggleSelect(schedule.id, idx, e)}
-                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] cursor-pointer"
                         />
                       </td>
                       <td className="py-4 px-4 whitespace-nowrap">
-                        <div className="font-bold text-slate-900 dark:text-slate-100">
+                        <div className="font-bold text-sm text-slate-900 dark:text-slate-100">
                           {formatDateDisplayManila(schedule.serviceDate)}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono font-medium">
+                        <div className="text-xs text-slate-500 dark:text-slate-400 font-mono font-medium">
                           {schedule.serviceDate}
                         </div>
                       </td>
                       <td className="py-4 px-4 whitespace-nowrap">
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                        <div className="flex flex-col items-start gap-1.5">
+                          <span className="px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide rounded-md bg-blue-50 dark:bg-blue-950/80 text-[#1b75bc] dark:text-[#54b0e2] border border-blue-200/60 dark:border-blue-800/60">
                             {schedule.serviceType}
                           </span>
 
+                          {isNoService && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded-md bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                              <Ban className="w-3 h-3 shrink-0" aria-hidden="true" />
+                              <span>No Service</span>
+                            </span>
+                          )}
+
                           {isEmpty && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded-md bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                               <span>Empty • Needs Planning</span>
                             </span>
                           )}
@@ -770,10 +874,10 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                                     openRepeatedPopoverId === schedule.id ? null : schedule.id
                                   );
                                 }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 cursor-pointer transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold rounded-md bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 cursor-pointer transition-colors shadow-2xs"
                                 title="Click to view repeated songs details"
                               >
-                                <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                                 <span>
                                   {repeatedSongs.length === 1
                                     ? '1 Repeated Song'
@@ -856,7 +960,9 @@ export const SchedulesView: React.FC<SchedulesViewProps> = ({
                         <LineupSongsPreview schedule={schedule} songsList={allSongs} />
                       </td>
                       <td className="py-4 px-4 whitespace-nowrap text-xs text-slate-600 dark:text-slate-300">
-                        {leaderDisplay ? (
+                        {isNoService ? (
+                          <span className="text-slate-400 dark:text-slate-500 italic">No Service</span>
+                        ) : leaderDisplay ? (
                           <div className="flex items-center gap-1.5">
                             <UserCheck className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                             <span className="font-semibold">{leaderDisplay}</span>

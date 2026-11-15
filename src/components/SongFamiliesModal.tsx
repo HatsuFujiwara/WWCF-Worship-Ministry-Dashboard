@@ -16,7 +16,9 @@ import {
   Music,
   Sparkles,
   Calendar,
-  Key
+  Key,
+  SlidersHorizontal,
+  ExternalLink
 } from 'lucide-react';
 import { Song, SongFamily, SongRelationshipType } from '../types';
 import { SongFamilyService } from '../services/songFamilyService';
@@ -69,6 +71,7 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
     return initial;
   });
   const [dissolvingFamilyId, setDissolvingFamilyId] = useState<string | null>(null);
+  const [comparingFamily, setComparingFamily] = useState<SongFamily | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -781,10 +784,26 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
                                       {song.title}
                                     </span>
                                     {renderRelationshipBadge(relationshipType, isOriginal)}
+                                    {song.arrangementName && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                        <SlidersHorizontal className="w-2.5 h-2.5" />
+                                        {song.arrangementName}
+                                      </span>
+                                    )}
                                     {song.key && (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700">
                                         <Key className="w-2.5 h-2.5 text-slate-400" />
                                         {song.key}
+                                      </span>
+                                    )}
+                                    {song.capo !== undefined && song.capo > 0 && (
+                                      <span className="inline-flex items-center text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200/80 dark:border-slate-700">
+                                        Capo {song.capo}
+                                      </span>
+                                    )}
+                                    {song.tuning && (
+                                      <span className="inline-flex items-center text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200/80 dark:border-slate-700">
+                                        {song.tuning}
                                       </span>
                                     )}
                                   </div>
@@ -792,6 +811,11 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
                                     <span>{song.artist || 'Unknown Artist'}</span>
                                     {song.bpm && <span>• {song.bpm} BPM</span>}
                                     <span>• Used {song.timesUsed || 0}x</span>
+                                    {song.rehearsalNotes && (
+                                      <span className="text-amber-600 dark:text-amber-400 truncate max-w-xs">
+                                        • Note: {song.rehearsalNotes}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -839,7 +863,7 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
                       </div>
 
                       {/* Footer for this specific family */}
-                      <div className="pt-1.5 flex items-center justify-between">
+                      <div className="pt-1.5 flex items-center justify-between flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -851,6 +875,20 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
                           <Plus className="w-3 h-3" />
                           <span>Add / Manage Songs in Family</span>
                         </button>
+
+                        {familySongs.length >= 2 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setComparingFamily(family);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200/80 dark:border-amber-800/80 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <SlidersHorizontal className="w-3 h-3" />
+                            <span>Compare Variants Side-by-Side ({familySongs.length})</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -888,6 +926,204 @@ export const SongFamiliesModal: React.FC<SongFamiliesModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Side-by-Side Variant Comparison Modal */}
+      {comparingFamily && (
+        <div
+          style={{ zIndex: zIndex + 20 }}
+          className="fixed inset-0 pointer-events-auto flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs transition-opacity duration-200"
+          onClick={() => setComparingFamily(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="compare-variants-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-5xl max-h-[90vh] bg-black text-slate-100 rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden ring-1 ring-white/10 modal-enter-animation"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/5 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-[#1b75bc]/20 text-[#5aa7e8] border border-[#1b75bc]/30">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 id="compare-variants-title" className="font-bold text-base text-white">
+                      {comparingFamily.name} — Variant Comparison
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1b75bc]/20 text-[#5aa7e8] border border-[#1b75bc]/30">
+                      {comparingFamily.versionIds.length} Variants
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Compare key, tempo, tuning, and arrangement notes side-by-side. Completely non-destructive.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setComparingFamily(null)}
+                aria-label="Close variant comparison"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Comparison Grid (Horizontal Scrollable on Smaller Screens) */}
+            <div className="p-6 overflow-y-auto overflow-x-auto flex-1 min-h-0">
+              <div
+                className="grid gap-4"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(comparingFamily.versionIds.length, 2)}, minmax(280px, 1fr))`
+                }}
+              >
+                {getFamilySongs(comparingFamily).map(({ song, relationshipType, isOriginal }) => (
+                  <div
+                    key={song.id}
+                    className={`rounded-2xl border p-4 flex flex-col justify-between space-y-4 ${
+                      isOriginal
+                        ? 'bg-amber-950/20 border-amber-800/60 ring-1 ring-amber-500/20'
+                        : 'bg-white/5 border-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    {/* Top Identity */}
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {song.thumbnailUrl ? (
+                            <img
+                              src={song.thumbnailUrl}
+                              alt={song.title}
+                              referrerPolicy="no-referrer"
+                              className="w-10 h-10 rounded-lg object-cover border border-white/10 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-[#1b75bc]/20 text-[#5aa7e8] flex items-center justify-center shrink-0 border border-white/10">
+                              <Music className="w-5 h-5" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-white truncate" title={song.title}>
+                              {song.title}
+                            </h4>
+                            <p className="text-xs text-slate-400 truncate">{song.artist || 'Unknown Artist'}</p>
+                          </div>
+                        </div>
+                        {renderRelationshipBadge(relationshipType, isOriginal)}
+                      </div>
+
+                      {/* Arrangement Label */}
+                      <div className="p-2.5 rounded-xl bg-black/60 border border-white/10 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                          Arrangement
+                        </span>
+                        <div className="text-xs font-bold text-[#5aa7e8]">
+                          {song.arrangementName || (isOriginal ? 'Original Canonical' : 'Standard Arrangement')}
+                        </div>
+                      </div>
+
+                      {/* Musical Specs Comparison Grid */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Performed Key</span>
+                          <span className="font-bold text-white text-sm">{song.key || '—'}</span>
+                          {song.originalKey && song.originalKey !== song.key && (
+                            <span className="text-[10px] text-slate-500 block">Orig: {song.originalKey}</span>
+                          )}
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Tempo (BPM)</span>
+                          <span className="font-bold text-white text-sm">
+                            {song.bpm ? `${song.bpm} BPM` : '—'}
+                          </span>
+                          <span className="text-[10px] text-slate-500 block">
+                            {song.timeSignature || '4/4'}
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Capo</span>
+                          <span className="font-bold text-white">
+                            {song.capo !== undefined && song.capo > 0 ? `Fret ${song.capo}` : 'None'}
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white/5 border border-white/5">
+                          <span className="text-[10px] text-slate-400 block">Tuning</span>
+                          <span className="font-bold text-white truncate block">
+                            {song.tuning || 'Standard'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Usage and Category */}
+                      <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/5 border border-white/5">
+                        <span className="text-slate-400">Total Church Usage</span>
+                        <span className="font-bold text-white">{song.timesUsed || 0} times</span>
+                      </div>
+
+                      {/* Rehearsal / Band Notes */}
+                      <div className="p-2.5 rounded-xl bg-black/60 border border-white/10 space-y-1 text-xs">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
+                          Rehearsal Directives
+                        </span>
+                        <p className="text-slate-300 text-xs leading-relaxed">
+                          {song.rehearsalNotes || song.notes || 'No specific rehearsal directives recorded for this variant.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bottom Actions */}
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                      {song.youtubeUrl ? (
+                        <a
+                          href={song.youtubeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>YouTube Ref</span>
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">No video link</span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setComparingFamily(null);
+                          onEditSong(song);
+                        }}
+                        className="px-3 py-1 text-xs font-semibold text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors cursor-pointer"
+                      >
+                        Edit Variant
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Comparison Footer */}
+            <div className="flex items-center justify-between px-6 py-3.5 bg-white/5 border-t border-white/10 shrink-0">
+              <p className="text-xs text-slate-400">
+                Safe and non-destructive: individual variants are never deleted when modifying song families.
+              </p>
+              <button
+                type="button"
+                onClick={() => setComparingFamily(null)}
+                className="px-4 py-2 text-xs font-bold text-white bg-white/10 hover:bg-white/20 rounded-xl transition-colors cursor-pointer"
+              >
+                Close Comparison
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );

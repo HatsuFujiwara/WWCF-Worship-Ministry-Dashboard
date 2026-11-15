@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Song, Schedule, SongCategory, SongFamily, SongRelationshipType } from '../types';
+import { Song, Schedule, SongCategory, SongFamily, SongRelationshipType, Member } from '../types';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
@@ -9,20 +9,32 @@ import { sanitizeSongLanguage } from '../utils/languageUtils';
 import { resolveSongVersionType } from '../utils/versionDetectionUtils';
 import { getSongTagClass, getLanguageTagCategory } from '../utils/songTagStyles';
 import { getManilaTodayString } from '../utils/dateUtils';
+import {
+  parseLyricsSlides,
+  hasUsableLyrics,
+  DEFAULT_MAX_LINES_PER_SLIDE,
+  MIN_LINES_PER_SLIDE,
+  MAX_LINES_PER_SLIDE
+} from '../utils/lyricsParser';
+import { CHART_INSTRUMENT_LABELS } from '../utils/chordChartUtils';
+import { buildYouTubeTimestampUrl, formatMarkerTimestamp } from '../utils/videoMarkerUtils';
 import { useMultiSelect } from '../hooks/useMultiSelect';
 import { SongFormModal } from './SongFormModal';
 import { SmartSongImportModal } from './SmartSongImportModal';
 import { SongFamilyModal } from './SongFamilyModal';
 import { SongFamilySuggestionsModal } from './SongFamilySuggestionsModal';
 import { SongFamiliesModal } from './SongFamiliesModal';
+import { SongFamiliarityModal } from './SongFamiliarityModal';
 import { SameNameSongsModal } from './SameNameSongsModal';
 import { GetMetadataModal } from './GetMetadataModal';
 import { BulkMetadataReviewModal } from './BulkMetadataReviewModal';
+import { ChordChartViewer } from './ChordChartViewer';
 import { Modal } from './Modal';
 import {
   Music,
   Plus,
   Search,
+  HeartHandshake,
   Filter,
   Youtube,
   Trash2,
@@ -49,7 +61,10 @@ import {
   Unlink,
   Check,
   GitCompare,
-  RotateCcw
+  RotateCcw,
+  BookOpen,
+  FileText,
+  Guitar
 } from 'lucide-react';
 
 export type SongSortOption =
@@ -63,6 +78,7 @@ export type SongSortOption =
 interface SongsViewProps {
   songs: Song[];
   schedules: Schedule[];
+  members?: Member[];
   onRefreshSongs: () => void;
   onUpdateSchedules: (updatedSchedules: Schedule[]) => void;
   showToast: (msg: string, type?: 'success' | 'danger' | 'info') => void;
@@ -71,10 +87,12 @@ interface SongsViewProps {
 export const SongsView: React.FC<SongsViewProps> = ({
   songs,
   schedules,
+  members = [],
   onRefreshSongs,
   onUpdateSchedules,
   showToast
 }) => {
+  const [isFamiliarityModalOpen, setIsFamiliarityModalOpen] = useState(false);
   // Filter Memory: Load last-used search, category, language, status, and sort settings
   const savedFilters = useMemo(() => StorageService.getSongsFilterSettings(), []);
 
@@ -138,6 +156,16 @@ export const SongsView: React.FC<SongsViewProps> = ({
 
   // Same-Name Songs Modal state
   const [isSameNameModalOpen, setIsSameNameModalOpen] = useState(false);
+
+  // Lyrics & Chart Preview Modal state
+  const [lyricsPreviewSong, setLyricsPreviewSong] = useState<Song | null>(null);
+  const [lyricsPreviewLinesPerSlide, setLyricsPreviewLinesPerSlide] = useState<number>(DEFAULT_MAX_LINES_PER_SLIDE);
+  const [chartPreviewSong, setChartPreviewSong] = useState<Song | null>(null);
+
+  const parsedLyricsPreviewDoc = useMemo(
+    () => parseLyricsSlides(lyricsPreviewSong?.lyrics, { maxLinesPerSlide: lyricsPreviewLinesPerSlide }),
+    [lyricsPreviewSong?.lyrics, lyricsPreviewLinesPerSlide]
+  );
 
   const handleOpenSameNameFinder = () => {
     // Fast O(N) scan to verify if any same-name groups exist
@@ -646,6 +674,16 @@ export const SongsView: React.FC<SongsViewProps> = ({
 
           <button
             type="button"
+            onClick={() => setIsFamiliarityModalOpen(true)}
+            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
+            title="Manage and inspect team song familiarity and mastery"
+          >
+            <HeartHandshake className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Team Familiarity</span>
+          </button>
+
+          <button
+            type="button"
             data-tour="find-same-name-btn"
             data-tts-label="Find Same-Name Songs in database"
             onClick={handleOpenSameNameFinder}
@@ -694,101 +732,116 @@ export const SongsView: React.FC<SongsViewProps> = ({
       </div>
       {/* Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Songs
           </p>
-          <p className="text-lg font-black text-slate-900 dark:text-slate-100 mt-0.5">
+          <p className="text-2xl font-black text-slate-900 dark:text-slate-100 tabular-nums mt-1">
             {songs.length}
           </p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Praise Songs
           </p>
-          <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums mt-1">
             {praiseCount}
           </p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Worship Songs
           </p>
-          <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
+          <p className="text-2xl font-black text-[#1b75bc] dark:text-[#54b0e2] tabular-nums mt-1">
             {worshipCount}
           </p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Used This Month
           </p>
-          <p className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5">
-            {songs.filter((s) => SongService.getMonthlyUsageCount(s.title, schedules, undefined, songs) > 0).length}
+          <p className="text-2xl font-black text-amber-600 dark:text-amber-400 tabular-nums mt-1">
+            {songs.filter((s) => SongService.getMonthlyUsageCount(s.title, schedules, undefined, songs, undefined, s.id) > 0).length}
           </p>
         </div>
       </div>
 
-      {/* Search & Filter Toolbar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
-        
-        {/* Search Bar */}
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            data-tour="song-search-input"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by song title, artist, key, CCLI..."
-            className="w-full pl-9 pr-8 py-2.5 text-xs sm:text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full cursor-pointer"
-              title="Clear search"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+      {/* Search & Filter Toolbar - Structured 2-Tier Layout */}
+      <div className="space-y-2.5 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+        {/* Tier 1: Search Bar & Match Count */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              data-tour="song-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by song title, artist, key, CCLI, theme..."
+              className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-[#1b75bc]/20 focus:border-[#1b75bc] outline-none transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full cursor-pointer"
+                title="Clear search"
+                aria-label="Clear search query"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 px-1">
+            <span className="tabular-nums">
+              Showing <strong className="text-slate-800 dark:text-slate-200">{sortedSongs.length}</strong> of {songs.length} songs
+            </span>
+          </div>
         </div>
 
-        {/* Category Pills & Filters Group */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto">
-          {/* Category Pills */}
-          <div className="flex items-center gap-1 flex-1 sm:flex-initial">
+        {/* Tier 2: Filter Controls, Dropdowns & Reset */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+          {/* Category Segmented Control */}
+          <div className="inline-flex rounded-xl p-1 bg-slate-100 dark:bg-black/60 border border-slate-200/60 dark:border-white/10 text-xs font-bold shrink-0">
             <button
+              type="button"
               onClick={() => setCategoryFilter('all')}
-              className={`btn-tactile flex-1 sm:flex-initial px-3.5 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all min-h-[38px] flex items-center justify-center ${
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer min-h-[34px] flex items-center gap-1.5 ${
                 categoryFilter === 'all'
                   ? 'bg-[#1b75bc] text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              All
+              <span>All</span>
+              <span className="text-[11px] opacity-75 font-mono">({songs.length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setCategoryFilter('praise')}
-              className={`btn-tactile flex-1 sm:flex-initial px-3.5 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all min-h-[38px] flex items-center justify-center ${
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer min-h-[34px] flex items-center gap-1.5 ${
                 categoryFilter === 'praise'
                   ? 'bg-amber-600 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Praise
+              <span>Praise</span>
+              <span className="text-[11px] opacity-75 font-mono">({praiseCount})</span>
             </button>
             <button
+              type="button"
               onClick={() => setCategoryFilter('worship')}
-              className={`btn-tactile flex-1 sm:flex-initial px-3.5 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all min-h-[38px] flex items-center justify-center ${
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer min-h-[34px] flex items-center gap-1.5 ${
                 categoryFilter === 'worship'
                   ? 'bg-[#1b75bc] text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Worship
+              <span>Worship</span>
+              <span className="text-[11px] opacity-75 font-mono">({worshipCount})</span>
             </button>
           </div>
 
@@ -796,7 +849,8 @@ export const SongsView: React.FC<SongsViewProps> = ({
           <select
             value={languageFilter}
             onChange={(e) => setLanguageFilter(e.target.value)}
-            className="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none w-full sm:w-auto min-h-[38px] cursor-pointer"
+            aria-label="Filter songs by language"
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer"
           >
             <option value="all">All Languages</option>
             <option value="English">English</option>
@@ -808,44 +862,41 @@ export const SongsView: React.FC<SongsViewProps> = ({
           <select
             value={versionTypeFilter}
             onChange={(e) => setVersionTypeFilter(e.target.value as 'all' | 'original' | 'cover')}
-            className="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none w-full sm:w-auto min-h-[38px] cursor-pointer"
+            aria-label="Filter songs by version status"
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer"
           >
             <option value="all">All Statuses</option>
-            <option value="original">Original Only</option>
-            <option value="cover">Cover Only</option>
+            <option value="original">Originals Only</option>
+            <option value="cover">Covers Only</option>
           </select>
 
           {/* Sort By Dropdown */}
-          <div className="flex items-center gap-1.5 w-full sm:w-auto">
-            <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider whitespace-nowrap pl-1 hidden xl:inline">
-              Sort by:
-            </span>
-            <div className="relative w-full sm:w-auto">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SongSortOption)}
-                aria-label="Sort songs"
-                className="w-full sm:w-auto pl-8 pr-8 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none min-h-[38px] cursor-pointer appearance-none hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
-              >
-                <option value="name-asc">Name — A to Z</option>
-                <option value="name-desc">Name — Z to A</option>
-                <option value="most-played">Most Played</option>
-                <option value="least-played">Least Played</option>
-                <option value="played-recently">Played Recently</option>
-                <option value="played-longest-ago">Played Longest Ago</option>
-              </select>
-              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute left-2.5 top-3" />
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute right-2.5 top-3" />
-            </div>
+          <div className="relative">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SongSortOption)}
+              aria-label="Sort songs"
+              className="pl-8 pr-8 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer appearance-none hover:border-slate-300 dark:hover:border-white/20 transition-colors"
+            >
+              <option value="name-asc">Name (A → Z)</option>
+              <option value="name-desc">Name (Z → A)</option>
+              <option value="most-played">Most Played</option>
+              <option value="least-played">Least Played</option>
+              <option value="played-recently">Played Recently</option>
+              <option value="played-longest-ago">Played Longest Ago</option>
+            </select>
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute left-2.5 top-3" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 pointer-events-none absolute right-2.5 top-3" />
           </div>
 
+          {/* Clear Filters Reset Button */}
           {hasActiveFilters && (
             <button
               type="button"
               onClick={handleResetFilters}
               title="Reset all search, category, language, and status filters"
               aria-label="Clear all song filters"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/80 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800 rounded-xl transition-all cursor-pointer min-h-[38px] shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/80 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900/60 rounded-xl transition-all cursor-pointer min-h-[40px] shrink-0"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Clear Filters</span>
@@ -1066,7 +1117,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
           </div>
         ) : (
           sortedSongs.map((song, idx) => {
-            const timesUsedThisMonth = SongService.getMonthlyUsageCount(song.title, schedules, undefined, songs);
+            const timesUsedThisMonth = SongService.getMonthlyUsageCount(song.title, schedules, undefined, songs, undefined, song.id);
             const effectiveStats = SongFamilyService.getEffectiveUsageStats(song, songs);
             const isExpanded = expandedHistoryId === song.id;
             const selected = isSelected(song.id);
@@ -1074,10 +1125,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
             return (
               <div
                 key={song.id}
-                className={`p-4 rounded-2xl bg-white dark:bg-slate-800 border transition-all flex flex-col justify-between space-y-3 card-hover-polish ${
+                className={`p-4 rounded-2xl bg-white dark:bg-slate-900 border transition-all flex flex-col justify-between space-y-3 card-hover-polish ${
                   selected
-                    ? 'border-indigo-500 dark:border-indigo-500 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-xs'
-                    : 'border-slate-200/80 dark:border-slate-700/80 shadow-xs hover:border-slate-300 dark:hover:border-slate-600'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-[#1b75bc]/5 dark:bg-[#1b75bc]/10 shadow-xs'
+                    : 'border-slate-200/80 dark:border-white/10 shadow-xs hover:border-slate-300 dark:hover:border-white/20'
                 }`}
               >
                 {/* Top Row: Checkbox + Thumbnail + Details */}
@@ -1096,7 +1147,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                         <img
                           src={song.thumbnailUrl}
                           alt={song.title}
-                          className="w-20 h-14 object-cover rounded-xl border border-slate-200 dark:border-slate-700"
+                          className="w-20 h-14 object-cover rounded-xl border border-slate-200 dark:border-white/10"
                         />
                         {song.youtubeUrl && (
                           <a
@@ -1110,7 +1161,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                         )}
                       </div>
                     ) : (
-                      <div className="w-20 h-14 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 border border-indigo-100 dark:border-indigo-900">
+                      <div className="w-20 h-14 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center font-black text-xs shrink-0 border border-blue-100 dark:border-blue-900/60">
                         {song.key || 'SONG'}
                       </div>
                     )}
@@ -1118,10 +1169,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 truncate">
+                          <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 truncate">
                             {song.title}
                           </h3>
-                          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          <p className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 truncate mt-0.5">
                             {song.artist || 'Unknown Artist'}
                           </p>
                         </div>
@@ -1137,7 +1188,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                               showToast('No YouTube link available for this song.', 'info');
                             }
                           }}
-                          className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+                          className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shrink-0 min-h-[36px] min-w-[36px] ${
                             song.youtubeUrl && song.youtubeUrl.trim()
                               ? 'bg-red-50 dark:bg-red-950/40 border-red-200/80 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/60 shadow-2xs hover:scale-105'
                               : 'bg-slate-100/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -1187,7 +1238,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
 
                         {/* 3. Original Key */}
                         <span className={getSongTagClass('key')}>
-                          Original Key: {song.originalKey || song.key || '—'}
+                          Key: {song.originalKey || song.key || '—'}
                         </span>
 
                         {/* 4. BPM Tag */}
@@ -1233,10 +1284,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
                             className={`${getSongTagClass('family')} hover:opacity-90 transition-opacity cursor-pointer`}
                             title="Click to view & manage Song Family in floating panel"
                           >
-                            <Layers className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                            <Layers className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
                             <span>Family: {songFamilies.find((f) => f.id === song.songFamilyId)?.name || 'Linked Family'}</span>
                             {song.relationshipType && (
-                              <span className="text-[9px] px-1 py-0.2 rounded bg-teal-200/60 dark:bg-teal-900/60 font-semibold uppercase">
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-teal-200/60 dark:bg-teal-900/60 font-semibold uppercase">
                                 {song.relationshipType.replace('_', ' ')}
                               </span>
                             )}
@@ -1247,9 +1298,9 @@ export const SongsView: React.FC<SongsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Bottom Row: Stats & Service History Drawer */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                  <div className="flex items-center gap-2">
+                {/* Bottom Row: Stats, Lyrics Status & Service History Drawer */}
+                <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2">
                     {timesUsedThisMonth > 0 ? (
                       <span className={getSongTagClass('used_this_month', 'rounded-full')}>
                         <CalendarCheck className="w-3 h-3 text-yellow-600 dark:text-yellow-400" />
@@ -1265,11 +1316,48 @@ export const SongsView: React.FC<SongsViewProps> = ({
                         <span>Last used: {effectiveStats.lastUsedDate || song.lastUsedDate}</span>
                       </span>
                     )}
+
+                    {hasUsableLyrics(song.lyrics) ? (
+                      <button
+                        type="button"
+                        onClick={() => setLyricsPreviewSong(song)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/20 transition-colors cursor-pointer"
+                        title="Preview structured lyrics slides"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                        <span>View Lyrics</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSong(song);
+                          setIsModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+                        title="Add lyrics for presentation and rehearsal"
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span>No Lyrics · Add</span>
+                      </button>
+                    )}
+
+                    {song.instrumentCharts && song.instrumentCharts.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setChartPreviewSong(song)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:border-[#1b75bc] hover:text-[#1b75bc] dark:hover:text-[#54b0e2] border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+                        title={`Open chord & cue charts (${song.instrumentCharts.map((c) => CHART_INSTRUMENT_LABELS[c.instrument]).join(', ')})`}
+                      >
+                        <Guitar className="w-3.5 h-3.5 shrink-0 text-[#1b75bc] dark:text-[#54b0e2]" />
+                        <span>Charts ({song.instrumentCharts.length})</span>
+                      </button>
+                    )}
                   </div>
 
                   <button
                     onClick={() => setExpandedHistoryId(isExpanded ? null : song.id)}
-                    className="inline-flex items-center gap-1 font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    className="inline-flex items-center gap-1 font-bold text-[#1b75bc] dark:text-[#54b0e2] hover:underline cursor-pointer min-h-[32px]"
                   >
                     <span>Used {effectiveStats.timesUsed}x{effectiveStats.isFamilyMember ? ' (Family)' : ''}</span>
                     {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -1278,16 +1366,16 @@ export const SongsView: React.FC<SongsViewProps> = ({
 
                 {/* Service History Expandable Drawer */}
                 {isExpanded && (
-                  <div className="mt-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs space-y-1.5 animate-in fade-in duration-150">
+                  <div className="mt-2 p-3 rounded-xl bg-slate-50 dark:bg-black/60 border border-slate-200/80 dark:border-white/10 text-xs space-y-1.5 animate-in fade-in duration-150">
                     <p className="font-bold text-slate-800 dark:text-slate-200">
                       Service Usage History
                     </p>
                     {song.serviceHistory && song.serviceHistory.length > 0 ? (
                       <ul className="space-y-1 text-slate-600 dark:text-slate-400 max-h-32 overflow-y-auto pr-1">
                         {song.serviceHistory.map((h, idx) => (
-                          <li key={idx} className="flex items-center justify-between text-[11px] py-0.5 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
+                          <li key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-200/50 dark:border-white/5 last:border-0">
                             <span>{h.serviceType}</span>
-                            <span className="font-medium text-slate-500">{h.date}</span>
+                            <span className="font-medium text-slate-500 tabular-nums">{h.date}</span>
                           </li>
                         ))}
                       </ul>
@@ -1485,6 +1573,240 @@ export const SongsView: React.FC<SongsViewProps> = ({
         }}
         showToast={showToast}
       />
+
+      {/* Song Familiarity Matrix Modal */}
+      <SongFamiliarityModal
+        isOpen={isFamiliarityModalOpen}
+        onClose={() => setIsFamiliarityModalOpen(false)}
+        songs={songs}
+        members={members}
+        showToast={showToast}
+      />
+
+      {/* Lyrics Preview Modal */}
+      <Modal
+        id="songs-lyrics-preview-modal"
+        isOpen={Boolean(lyricsPreviewSong)}
+        title={lyricsPreviewSong ? `Lyrics: ${lyricsPreviewSong.title}` : 'Lyrics Preview'}
+        maxWidth="max-w-2xl"
+        onClose={() => setLyricsPreviewSong(null)}
+      >
+        {lyricsPreviewSong && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                <span className="font-semibold text-slate-900 dark:text-slate-100">{lyricsPreviewSong.artist || 'Unknown Artist'}</span>
+                {(lyricsPreviewSong.originalKey || lyricsPreviewSong.key) && (
+                  <span> · Original Key: {lyricsPreviewSong.originalKey || lyricsPreviewSong.key}</span>
+                )}
+                <span className="tabular-nums">
+                  {' '}· {parsedLyricsPreviewDoc.slideCount} {parsedLyricsPreviewDoc.slideCount === 1 ? 'slide' : 'slides'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="songs-preview-lines-per-slide" className="text-xs text-slate-500 dark:text-slate-400">
+                  Lines / slide
+                </label>
+                <select
+                  id="songs-preview-lines-per-slide"
+                  value={lyricsPreviewLinesPerSlide}
+                  onChange={(e) => setLyricsPreviewLinesPerSlide(Number(e.target.value))}
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none"
+                >
+                  {Array.from(
+                    { length: MAX_LINES_PER_SLIDE - MIN_LINES_PER_SLIDE + 1 },
+                    (_, i) => MIN_LINES_PER_SLIDE + i
+                  ).map((n) => (
+                    <option key={n} value={n}>
+                      {n} lines
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {!parsedLyricsPreviewDoc.hasLyrics ? (
+              <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                No displayable lyrics lines found for this song.
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+                {parsedLyricsPreviewDoc.groups.map((group) => (
+                  <div key={group.id} className="space-y-2">
+                    <div className="text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2]">
+                      {group.group}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {group.slides.map((slide) => (
+                        <div
+                          key={slide.id}
+                          className="p-3 rounded-xl bg-black text-white border border-slate-800 space-y-1.5"
+                        >
+                          <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                            Slide {slide.globalIndex + 1} · {group.group}
+                          </div>
+                          <div className="text-sm whitespace-pre-line leading-relaxed font-medium">
+                            {slide.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              {lyricsPreviewSong.instrumentCharts && lyricsPreviewSong.instrumentCharts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = lyricsPreviewSong;
+                    setLyricsPreviewSong(null);
+                    setChartPreviewSong(target);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-colors cursor-pointer mr-auto"
+                >
+                  <Guitar className="w-3.5 h-3.5" />
+                  <span>Open Charts ({lyricsPreviewSong.instrumentCharts.length})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setLyricsPreviewSong(null)}
+                className="px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = lyricsPreviewSong;
+                  setLyricsPreviewSong(null);
+                  setEditingSong(target);
+                  setIsModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl transition-colors cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Edit Lyrics</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Interactive Chord & Cue Chart Viewer Modal (HX-01 / HX-02) */}
+      <Modal
+        id="songs-chart-preview-modal"
+        isOpen={Boolean(chartPreviewSong)}
+        title={chartPreviewSong ? `Chord & Cue Charts: ${chartPreviewSong.title}` : 'Chord Charts'}
+        maxWidth="max-w-3xl"
+        onClose={() => setChartPreviewSong(null)}
+      >
+        {chartPreviewSong && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+              <div>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {chartPreviewSong.artist || 'Unknown Artist'}
+                </span>
+                {(chartPreviewSong.originalKey || chartPreviewSong.key) && (
+                  <span> · Original Key: {chartPreviewSong.originalKey || chartPreviewSong.key}</span>
+                )}
+                {chartPreviewSong.bpm && <span> · {chartPreviewSong.bpm} BPM</span>}
+                {chartPreviewSong.timeSignature && <span> · {chartPreviewSong.timeSignature}</span>}
+              </div>
+            </div>
+
+            <ChordChartViewer
+              songTitle={chartPreviewSong.title}
+              charts={chartPreviewSong.instrumentCharts || []}
+              baseKey={chartPreviewSong.originalKey || chartPreviewSong.key}
+              initialCapo={chartPreviewSong.capo}
+              maxHeightClass="max-h-[52vh]"
+            />
+
+            {chartPreviewSong.videoMarkers && chartPreviewSong.videoMarkers.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs pt-1">
+                <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400 font-semibold mr-1">
+                  <Youtube className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                  <span>Video Cues:</span>
+                </span>
+                {chartPreviewSong.videoMarkers.map((marker) => {
+                  const jumpUrl = buildYouTubeTimestampUrl(
+                    chartPreviewSong.youtubeUrl,
+                    chartPreviewSong.youtubeId,
+                    marker.timeSeconds
+                  );
+                  return jumpUrl ? (
+                    <a
+                      key={marker.id}
+                      href={jumpUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:border-[#1b75bc] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
+                    >
+                      <span className="font-mono font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums">
+                        {formatMarkerTimestamp(marker.timeSeconds)}
+                      </span>
+                      <span>{marker.label}</span>
+                    </a>
+                  ) : (
+                    <span
+                      key={marker.id}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                    >
+                      <span className="font-mono font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums">
+                        {formatMarkerTimestamp(marker.timeSeconds)}
+                      </span>
+                      <span>{marker.label}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              {hasUsableLyrics(chartPreviewSong.lyrics) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = chartPreviewSong;
+                    setChartPreviewSong(null);
+                    setLyricsPreviewSong(target);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/25 rounded-xl transition-colors cursor-pointer mr-auto"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>View Lyrics</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setChartPreviewSong(null)}
+                className="px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = chartPreviewSong;
+                  setChartPreviewSong(null);
+                  setEditingSong(target);
+                  setIsModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl transition-colors cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Edit Charts</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
     </div>
   );

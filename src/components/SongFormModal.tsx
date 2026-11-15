@@ -1,6 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Song, SongCategory, SongFamily, SongRelationshipType, SongVersionType } from '../types';
+import {
+  Song,
+  SongCategory,
+  SongFamily,
+  SongRelationshipType,
+  SongVersionType,
+  ChartInstrumentType,
+  InstrumentChartVariant,
+  SongVideoMarker
+} from '../types';
 import { SongService, DuplicateMatch } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
@@ -8,9 +17,33 @@ import { fetchMultiSourceMetadata } from '../services/musicMetadataService';
 import { getManilaTodayString } from '../utils/dateUtils';
 import { COMMON_THEMES } from '../utils/recommendationUtils';
 import { detectSongVersionType, resolveSongVersionType } from '../utils/versionDetectionUtils';
+import {
+  parseLyricsSlides,
+  MAX_LYRICS_LENGTH,
+  DEFAULT_MAX_LINES_PER_SLIDE,
+  MIN_LINES_PER_SLIDE,
+  MAX_LINES_PER_SLIDE
+} from '../utils/lyricsParser';
+import {
+  CHART_INSTRUMENT_LABELS,
+  VALID_CHART_INSTRUMENTS,
+  MAX_INSTRUMENT_CHARTS_PER_SONG,
+  MAX_CHART_CONTENT_LENGTH,
+  isPitchedChartInstrument,
+  isCapoSupportedInstrument,
+  validateInstrumentCharts
+} from '../utils/chordChartUtils';
+import {
+  MAX_VIDEO_MARKERS_PER_SONG,
+  parseMarkerTimestamp,
+  formatMarkerTimestamp,
+  buildYouTubeTimestampUrl,
+  validateVideoMarkers
+} from '../utils/videoMarkerUtils';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import { DuplicateSongModal } from './DuplicateSongModal';
 import { SwapTitleArtistButton } from './SwapTitleArtistButton';
+import { ChordChartViewer } from './ChordChartViewer';
 import {
   X,
   Youtube,
@@ -26,7 +59,16 @@ import {
   Globe,
   KeyRound,
   Layers,
-  BookOpen
+  BookOpen,
+  SlidersHorizontal,
+  Upload,
+  ClipboardPaste,
+  Eye,
+  EyeOff,
+  Plus,
+  Trash2,
+  Copy,
+  Guitar
 } from 'lucide-react';
 
 interface SongFormModalProps {
@@ -76,6 +118,12 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
   const [themes, setThemes] = useState<string[]>([]);
   const [customThemeInput, setCustomThemeInput] = useState('');
 
+  // Arrangement & Variant Tracking
+  const [arrangementName, setArrangementName] = useState('');
+  const [capo, setCapo] = useState('');
+  const [tuning, setTuning] = useState('');
+  const [rehearsalNotes, setRehearsalNotes] = useState('');
+
   // Song Family & Composition Metadata
   const [songFamilyId, setSongFamilyId] = useState<string>('');
   const [relationshipType, setRelationshipType] = useState<SongRelationshipType>('ORIGINAL');
@@ -89,6 +137,27 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
   const [isFetchingMeta, setIsFetchingMeta] = useState(false);
   const [metaImportError, setMetaImportError] = useState('');
   const [fetchInput, setFetchInput] = useState('');
+
+  // Lyrics Authoring Studio State
+  const lyricsTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const lyricsFileInputRef = useRef<HTMLInputElement>(null);
+  const [showLyricsPreview, setShowLyricsPreview] = useState(false);
+  const [previewLinesPerSlide, setPreviewLinesPerSlide] = useState(DEFAULT_MAX_LINES_PER_SLIDE);
+  const [pendingLyricsImport, setPendingLyricsImport] = useState<{
+    text: string;
+    sourceLabel: string;
+  } | null>(null);
+
+  // Instrument Chord Charts Studio State (HX-01)
+  const chartTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [instrumentCharts, setInstrumentCharts] = useState<InstrumentChartVariant[]>([]);
+  const [activeChartId, setActiveChartId] = useState<string | null>(null);
+  const [showChartLivePreview, setShowChartLivePreview] = useState(false);
+
+  // YouTube Section Markers State (HX-04)
+  const [videoMarkers, setVideoMarkers] = useState<SongVideoMarker[]>([]);
+  const [markerTimeInput, setMarkerTimeInput] = useState('');
+  const [markerLabelInput, setMarkerLabelInput] = useState('');
 
   // Duplicate Modal State
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
@@ -125,11 +194,19 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
       setGeniusUrl(songToEdit.geniusUrl || '');
       setNotes(songToEdit.notes || '');
       setThemes(songToEdit.themes || songToEdit.labels || []);
+      setArrangementName(songToEdit.arrangementName || '');
+      setCapo(songToEdit.capo !== undefined ? String(songToEdit.capo) : '');
+      setTuning(songToEdit.tuning || '');
+      setRehearsalNotes(songToEdit.rehearsalNotes || '');
       setSongFamilyId(songToEdit.songFamilyId || '');
       setRelationshipType(songToEdit.relationshipType || 'ORIGINAL');
       setSongwriters(songToEdit.songwriters || (songToEdit.composers ? songToEdit.composers.join(', ') : ''));
       setOriginalArtist(songToEdit.originalArtist || '');
       setLyrics(songToEdit.lyrics || '');
+      const initialCharts = (songToEdit.instrumentCharts || []).map((c) => ({ ...c }));
+      setInstrumentCharts(initialCharts);
+      setActiveChartId(initialCharts[0]?.id || null);
+      setVideoMarkers((songToEdit.videoMarkers || []).map((m) => ({ ...m })));
       setFetchInput(songToEdit.youtubeUrl || `${songToEdit.title} ${songToEdit.artist}`.trim());
     } else {
       setTitle('');
@@ -157,16 +234,309 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
       setGeniusUrl('');
       setNotes('');
       setThemes([]);
+      setArrangementName('');
+      setCapo('');
+      setTuning('');
+      setRehearsalNotes('');
       setSongFamilyId('');
       setRelationshipType('ORIGINAL');
       setSongwriters('');
       setOriginalArtist('');
       setLyrics('');
+      setInstrumentCharts([]);
+      setActiveChartId(null);
+      setVideoMarkers([]);
       setFetchInput('');
     }
     setMetaImportError('');
     setDuplicateMatch(null);
+    setPendingLyricsImport(null);
+    setMarkerTimeInput('');
+    setMarkerLabelInput('');
+    setShowChartLivePreview(false);
+    setShowLyricsPreview(Boolean(songToEdit?.lyrics && songToEdit.lyrics.trim()));
   }, [songToEdit, isOpen]);
+
+  const parsedLyricsDoc = useMemo(
+    () => parseLyricsSlides(lyrics, { maxLinesPerSlide: previewLinesPerSlide }),
+    [lyrics, previewLinesPerSlide]
+  );
+
+  const applyBoundedLyrics = (incomingText: string, mode: 'replace' | 'append' = 'replace'): boolean => {
+    const normalizedIncoming = incomingText.replace(/\r\n?/g, '\n');
+    const combined =
+      mode === 'append' && lyrics.trim()
+        ? `${lyrics.replace(/\s+$/, '')}\n\n${normalizedIncoming.replace(/^\s+/, '')}`
+        : normalizedIncoming;
+
+    if (combined.length > MAX_LYRICS_LENGTH) {
+      showToast(
+        `Lyrics exceed the ${MAX_LYRICS_LENGTH.toLocaleString()}-character limit (${combined.length.toLocaleString()} characters). Please shorten the text before importing.`,
+        'danger'
+      );
+      return false;
+    }
+    setLyrics(combined);
+    return true;
+  };
+
+  const handleInsertSectionTag = (tagLabel: string) => {
+    const textarea = lyricsTextareaRef.current;
+    const tagText = `[${tagLabel}]\n`;
+
+    if (!textarea) {
+      const prefix = lyrics.trim() ? (lyrics.endsWith('\n') ? '\n' : '\n\n') : '';
+      applyBoundedLyrics(`${lyrics}${prefix}${tagText}`, 'replace');
+      return;
+    }
+
+    const start = textarea.selectionStart ?? lyrics.length;
+    const end = textarea.selectionEnd ?? lyrics.length;
+    const before = lyrics.slice(0, start);
+    const after = lyrics.slice(end);
+    const needsLeadingBreak = before.length > 0 && !before.endsWith('\n');
+    const insertion = `${needsLeadingBreak ? '\n\n' : before.length > 0 && !before.endsWith('\n\n') ? '\n' : ''}${tagText}`;
+    const nextValue = `${before}${insertion}${after}`;
+
+    if (nextValue.length > MAX_LYRICS_LENGTH) {
+      showToast(`Lyrics cannot exceed ${MAX_LYRICS_LENGTH.toLocaleString()} characters.`, 'danger');
+      return;
+    }
+
+    setLyrics(nextValue);
+    const nextCaret = before.length + insertion.length;
+    requestAnimationFrame(() => {
+      if (lyricsTextareaRef.current) {
+        lyricsTextareaRef.current.focus();
+        lyricsTextareaRef.current.setSelectionRange(nextCaret, nextCaret);
+      }
+    });
+  };
+
+  const handleImportTxtFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const fileNameLower = file.name.toLowerCase();
+    const isTxt = fileNameLower.endsWith('.txt') || file.type === 'text/plain';
+    if (!isTxt) {
+      showToast('Please select a plain text (.txt) lyrics file.', 'danger');
+      return;
+    }
+
+    if (file.size > 256 * 1024) {
+      showToast('Lyrics text file exceeds the 256 KB upload limit.', 'danger');
+      return;
+    }
+
+    try {
+      const rawText = (await file.text()).replace(/\r\n?/g, '\n').trim();
+      if (!rawText) {
+        showToast('The selected .txt file is empty.', 'info');
+        return;
+      }
+
+      if (rawText.length > MAX_LYRICS_LENGTH) {
+        showToast(
+          `"${file.name}" exceeds the ${MAX_LYRICS_LENGTH.toLocaleString()}-character lyrics limit (${rawText.length.toLocaleString()} characters).`,
+          'danger'
+        );
+        return;
+      }
+
+      if (lyrics.trim()) {
+        setPendingLyricsImport({ text: rawText, sourceLabel: file.name });
+      } else if (applyBoundedLyrics(rawText, 'replace')) {
+        setShowLyricsPreview(true);
+        showToast(`Imported lyrics from "${file.name}".`, 'success');
+      }
+    } catch (err) {
+      console.error('Failed to read .txt lyrics file:', err);
+      showToast('Could not read the selected .txt file.', 'danger');
+    }
+  };
+
+  const handlePasteClipboardLyrics = async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+      showToast('Clipboard access is unavailable here. Paste directly into the lyrics box.', 'info');
+      return;
+    }
+
+    try {
+      const clipText = (await navigator.clipboard.readText()).replace(/\r\n?/g, '\n').trim();
+      if (!clipText) {
+        showToast('Clipboard is empty or has no plain text.', 'info');
+        return;
+      }
+
+      if (clipText.length > MAX_LYRICS_LENGTH) {
+        showToast(
+          `Clipboard lyrics exceed the ${MAX_LYRICS_LENGTH.toLocaleString()}-character limit (${clipText.length.toLocaleString()} characters).`,
+          'danger'
+        );
+        return;
+      }
+
+      if (lyrics.trim()) {
+        setPendingLyricsImport({ text: clipText, sourceLabel: 'Clipboard' });
+      } else if (applyBoundedLyrics(clipText, 'replace')) {
+        setShowLyricsPreview(true);
+        showToast('Pasted lyrics from clipboard.', 'success');
+      }
+    } catch {
+      showToast('Clipboard permission denied. Paste directly into the lyrics box (Ctrl+V / Cmd+V).', 'info');
+    }
+  };
+
+  const activeInstrumentChart = useMemo(
+    () => instrumentCharts.find((c) => c.id === activeChartId) || instrumentCharts[0] || null,
+    [instrumentCharts, activeChartId]
+  );
+
+  const handleAddInstrumentChart = (instrument: ChartInstrumentType = 'guitar') => {
+    if (instrumentCharts.length >= MAX_INSTRUMENT_CHARTS_PER_SONG) {
+      showToast(`A song can store up to ${MAX_INSTRUMENT_CHARTS_PER_SONG} instrument charts.`, 'danger');
+      return;
+    }
+    const usedCount = instrumentCharts.filter((c) => c.instrument === instrument).length;
+    const newId = `chart_${instrument}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newChart: InstrumentChartVariant = {
+      id: newId,
+      instrument,
+      label: usedCount > 0 ? `${CHART_INSTRUMENT_LABELS[instrument]} ${usedCount + 1}` : '',
+      content: '',
+      key: originalKey.trim() || undefined,
+      capo: instrument === 'guitar' && capo.trim() ? Number(capo) || undefined : undefined,
+      tuning: instrument === 'guitar' && tuning.trim() ? tuning.trim() : undefined,
+      updatedAt: new Date().toISOString()
+    };
+    setInstrumentCharts((prev) => [...prev, newChart]);
+    setActiveChartId(newId);
+    setShowChartLivePreview(false);
+  };
+
+  const handleUpdateActiveChart = (patch: Partial<InstrumentChartVariant>) => {
+    if (!activeInstrumentChart) return;
+    if (typeof patch.content === 'string' && patch.content.length > MAX_CHART_CONTENT_LENGTH) {
+      showToast(
+        `Chart content exceeds the ${MAX_CHART_CONTENT_LENGTH.toLocaleString()}-character limit (${patch.content.length.toLocaleString()} characters).`,
+        'danger'
+      );
+      return;
+    }
+    setInstrumentCharts((prev) =>
+      prev.map((c) =>
+        c.id === activeInstrumentChart.id
+          ? {
+              ...c,
+              ...patch,
+              updatedAt: new Date().toISOString()
+            }
+          : c
+      )
+    );
+  };
+
+  const handleRemoveInstrumentChart = (chartId: string) => {
+    setInstrumentCharts((prev) => {
+      const remaining = prev.filter((c) => c.id !== chartId);
+      if (activeChartId === chartId) {
+        setActiveChartId(remaining[0]?.id || null);
+      }
+      return remaining;
+    });
+  };
+
+  const handleInsertChartSectionTag = (tagLabel: string) => {
+    if (!activeInstrumentChart) return;
+    const content = activeInstrumentChart.content || '';
+    const textarea = chartTextareaRef.current;
+    const tagText = `[${tagLabel}]\n`;
+
+    if (!textarea) {
+      const prefix = content.trim() ? (content.endsWith('\n') ? '\n' : '\n\n') : '';
+      handleUpdateActiveChart({ content: `${content}${prefix}${tagText}` });
+      return;
+    }
+
+    const start = textarea.selectionStart ?? content.length;
+    const end = textarea.selectionEnd ?? content.length;
+    const before = content.slice(0, start);
+    const after = content.slice(end);
+    const needsLeadingBreak = before.length > 0 && !before.endsWith('\n');
+    const insertion = `${needsLeadingBreak ? '\n\n' : before.length > 0 && !before.endsWith('\n\n') ? '\n' : ''}${tagText}`;
+    const nextValue = `${before}${insertion}${after}`;
+
+    if (nextValue.length > MAX_CHART_CONTENT_LENGTH) {
+      showToast(`Chart cannot exceed ${MAX_CHART_CONTENT_LENGTH.toLocaleString()} characters.`, 'danger');
+      return;
+    }
+
+    handleUpdateActiveChart({ content: nextValue });
+    const nextCaret = before.length + insertion.length;
+    requestAnimationFrame(() => {
+      if (chartTextareaRef.current) {
+        chartTextareaRef.current.focus();
+        chartTextareaRef.current.setSelectionRange(nextCaret, nextCaret);
+      }
+    });
+  };
+
+  const handleCopyLyricsToActiveChart = () => {
+    if (!activeInstrumentChart) return;
+    const cleanLyrics = lyrics.trim();
+    if (!cleanLyrics) {
+      showToast('Enter lyrics first before copying structure into this chart.', 'info');
+      return;
+    }
+    if (cleanLyrics.length > MAX_CHART_CONTENT_LENGTH) {
+      showToast(`Chart content cannot exceed ${MAX_CHART_CONTENT_LENGTH.toLocaleString()} characters.`, 'danger');
+      return;
+    }
+    if (activeInstrumentChart.content.trim()) {
+      const prefix = activeInstrumentChart.content.replace(/\s+$/, '');
+      const appended = `${prefix}\n\n${cleanLyrics}`;
+      if (appended.length > MAX_CHART_CONTENT_LENGTH) {
+        showToast(`Combined chart exceeds the ${MAX_CHART_CONTENT_LENGTH.toLocaleString()}-character limit.`, 'danger');
+        return;
+      }
+      handleUpdateActiveChart({ content: appended });
+      showToast('Appended lyrics structure to the end of this chart.', 'success');
+    } else {
+      handleUpdateActiveChart({ content: cleanLyrics });
+      showToast('Copied lyrics structure into chart editor.', 'success');
+    }
+  };
+
+  const handleAddVideoMarker = () => {
+    if (videoMarkers.length >= MAX_VIDEO_MARKERS_PER_SONG) {
+      showToast(`A song can store up to ${MAX_VIDEO_MARKERS_PER_SONG} video cues.`, 'danger');
+      return;
+    }
+    const cleanLabel = markerLabelInput.trim();
+    if (!cleanLabel) {
+      showToast('Enter a section label for the timestamp cue (e.g. Chorus 1).', 'danger');
+      return;
+    }
+    const parsedSec = parseMarkerTimestamp(markerTimeInput);
+    if (parsedSec === null) {
+      showToast('Enter a valid timestamp such as 1:24, 0:45, or 90 seconds.', 'danger');
+      return;
+    }
+    const nextMarker: SongVideoMarker = {
+      id: `marker_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      label: cleanLabel.slice(0, 80),
+      timeSeconds: parsedSec
+    };
+    setVideoMarkers((prev) => [...prev, nextMarker].sort((a, b) => a.timeSeconds - b.timeSeconds));
+    setMarkerTimeInput('');
+    setMarkerLabelInput('');
+  };
+
+  const handleRemoveVideoMarker = (markerId: string) => {
+    setVideoMarkers((prev) => prev.filter((m) => m.id !== markerId));
+  };
 
   // Handle multi-source metadata import (YouTube Music, YouTube, Spotify, Apple Music, Qobuz, TIDAL)
   const handleFetchMultiSourceMetadata = async () => {
@@ -226,6 +596,26 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
       return;
     }
 
+    if (lyrics.trim().length > MAX_LYRICS_LENGTH) {
+      showToast(
+        `Lyrics cannot exceed ${MAX_LYRICS_LENGTH.toLocaleString()} characters (${lyrics.trim().length.toLocaleString()} entered).`,
+        'danger'
+      );
+      return;
+    }
+
+    const chartValidation = validateInstrumentCharts(instrumentCharts, title.trim());
+    if (chartValidation.error) {
+      showToast(chartValidation.error, 'danger');
+      return;
+    }
+
+    const markerValidation = validateVideoMarkers(videoMarkers, title.trim());
+    if (markerValidation.error) {
+      showToast(markerValidation.error, 'danger');
+      return;
+    }
+
     const songDataToSave: Partial<Song> & { title: string } = {
       id: songToEdit?.id,
       title: title.trim(),
@@ -255,11 +645,17 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
       notes: notes.trim(),
       themes,
       labels: themes,
+      arrangementName: arrangementName.trim() || undefined,
+      capo: capo.trim() !== '' ? parseInt(capo, 10) : undefined,
+      tuning: tuning.trim() || undefined,
+      rehearsalNotes: rehearsalNotes.trim() || undefined,
       songFamilyId: songFamilyId.trim() || undefined,
       relationshipType: relationshipType || 'ORIGINAL',
       songwriters: songwriters.trim() || undefined,
       originalArtist: originalArtist.trim() || undefined,
       lyrics: lyrics.trim() || undefined,
+      instrumentCharts: chartValidation.valid ?? [],
+      videoMarkers: markerValidation.valid ?? [],
       dateAdded: songToEdit?.dateAdded || getManilaTodayString(),
       timesUsed: songToEdit?.timesUsed || 0,
       serviceHistory: songToEdit?.serviceHistory || []
@@ -610,19 +1006,482 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
               </div>
             </div>
 
-            {/* Lyrics */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                <span>Lyrics (Optional, used for identity verification)</span>
-              </label>
+            {/* Lyrics Authoring & Projection Slide Studio */}
+            <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label
+                  htmlFor="song-lyrics-textarea"
+                  className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
+                  <span>Lyrics &amp; Projection Slides</span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                  {parsedLyricsDoc.hasLyrics && (
+                    <span>
+                      {parsedLyricsDoc.slideCount} {parsedLyricsDoc.slideCount === 1 ? 'slide' : 'slides'} · {parsedLyricsDoc.groupCount}{' '}
+                      {parsedLyricsDoc.groupCount === 1 ? 'section' : 'sections'}
+                    </span>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  <span className={lyrics.length >= MAX_LYRICS_LENGTH ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
+                    {lyrics.length.toLocaleString()} / {MAX_LYRICS_LENGTH.toLocaleString()} chars
+                  </span>
+                </div>
+              </div>
+
+              {/* Authoring Toolbar: Quick Section Tags + Import / Paste / Preview */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Insert lyrics section tag">
+                  {['Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Tag', 'Outro', 'Instrumental'].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => handleInsertSectionTag(tag)}
+                      className="px-2 py-1 text-[11px] font-semibold rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-[#1b75bc] hover:text-[#1b75bc] dark:hover:text-[#54b0e2] transition-colors cursor-pointer"
+                    >
+                      + [{tag}]
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    ref={lyricsFileInputRef}
+                    type="file"
+                    accept=".txt,text/plain"
+                    onChange={handleImportTxtFile}
+                    className="hidden"
+                    aria-label="Upload plain text lyrics file"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => lyricsFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3 h-3" />
+                    <span>Import .txt</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePasteClipboardLyrics}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ClipboardPaste className="w-3 h-3" />
+                    <span>Paste</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowLyricsPreview((prev) => !prev)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors cursor-pointer ${
+                      showLyricsPreview
+                        ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {showLyricsPreview ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showLyricsPreview ? 'Hide Preview' : 'Slide Preview'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Replace vs Append Confirmation Prompt */}
+              {pendingLyricsImport && (
+                <div
+                  role="alertdialog"
+                  aria-label="Confirm lyrics import action"
+                  className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 space-y-2"
+                >
+                  <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">
+                        Existing lyrics detected — how should &ldquo;{pendingLyricsImport.sourceLabel}&rdquo; be imported?
+                      </p>
+                      <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 mt-0.5">
+                        Choose Replace to overwrite existing lyrics or Append to add the imported text at the end.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingLyricsImport(null)}
+                      className="px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (applyBoundedLyrics(pendingLyricsImport.text, 'append')) {
+                          setPendingLyricsImport(null);
+                          setShowLyricsPreview(true);
+                          showToast('Appended imported lyrics.', 'success');
+                        }
+                      }}
+                      className="px-3 py-1 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 hover:bg-[#1b75bc]/20 border border-[#1b75bc]/30 rounded-lg cursor-pointer"
+                    >
+                      Append
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (applyBoundedLyrics(pendingLyricsImport.text, 'replace')) {
+                          setPendingLyricsImport(null);
+                          setShowLyricsPreview(true);
+                          showToast('Replaced lyrics with imported text.', 'success');
+                        }
+                      }}
+                      className="px-3 py-1 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg cursor-pointer"
+                    >
+                      Replace Existing
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <textarea
-                rows={2}
+                id="song-lyrics-textarea"
+                ref={lyricsTextareaRef}
+                rows={7}
+                maxLength={MAX_LYRICS_LENGTH}
                 value={lyrics}
-                onChange={(e) => setLyrics(e.target.value)}
-                placeholder="Paste song lyrics or chorus here..."
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                onChange={(e) => applyBoundedLyrics(e.target.value, 'replace')}
+                placeholder={`[Verse]\nEnter stanza lines here...\nUse blank lines to split projection slides.\n\n[Chorus]\nChorus lines...`}
+                className="w-full px-3 py-2.5 text-xs font-mono leading-relaxed rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none resize-y"
               />
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Tip: Use <span className="font-mono">[Verse]</span>, <span className="font-mono">[Chorus]</span>, or <span className="font-mono">[Bridge]</span> headers and blank lines between slides. Duplicate unnumbered headers auto-number cleanly.
+              </p>
+
+              {/* Live Slide Preview Panel */}
+              {showLyricsPreview && (
+                <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Live Projection Slide Preview
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="song-form-lines-per-slide" className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        Lines / slide
+                      </label>
+                      <select
+                        id="song-form-lines-per-slide"
+                        value={previewLinesPerSlide}
+                        onChange={(e) => setPreviewLinesPerSlide(Number(e.target.value))}
+                        className="px-2 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none"
+                      >
+                        {Array.from(
+                          { length: MAX_LINES_PER_SLIDE - MIN_LINES_PER_SLIDE + 1 },
+                          (_, i) => MIN_LINES_PER_SLIDE + i
+                        ).map((n) => (
+                          <option key={n} value={n}>
+                            {n} lines
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {!parsedLyricsDoc.hasLyrics ? (
+                    <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-700 text-center text-xs text-slate-500 dark:text-slate-400">
+                      Enter lyrics above to preview grouped projection slides.
+                    </div>
+                  ) : (
+                    <div className="max-h-56 overflow-y-auto space-y-3 pr-1">
+                      {parsedLyricsDoc.groups.map((group) => (
+                        <div key={group.id} className="space-y-1.5">
+                          <div className="text-[11px] font-bold text-[#1b75bc] dark:text-[#54b0e2]">
+                            {group.group} ({group.slides.length})
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {group.slides.map((slide) => (
+                              <div
+                                key={slide.id}
+                                className="p-2.5 rounded-lg bg-black text-white border border-slate-800 text-xs leading-relaxed space-y-1"
+                              >
+                                <div className="text-[10px] font-mono text-slate-400 tabular-nums">
+                                  Slide {slide.globalIndex + 1} · {group.group}
+                                </div>
+                                <div className="whitespace-pre-line font-medium">
+                                  {slide.text}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Instrument Chord & Cue Charts Studio (HX-01 / HX-02) */}
+            <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Guitar className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Instrument Chord &amp; Cue Charts
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                    ({instrumentCharts.length} / {MAX_INSTRUMENT_CHARTS_PER_SONG})
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {instrumentCharts.some((c) => c.content.trim().length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowChartLivePreview((prev) => !prev)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors cursor-pointer ${
+                        showChartLivePreview
+                          ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {showChartLivePreview ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showChartLivePreview ? 'Hide Chart Preview' : 'Test Transpose / Capo'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={instrumentCharts.length >= MAX_INSTRUMENT_CHARTS_PER_SONG}
+                    onClick={() => handleAddInstrumentChart(instrumentCharts.length === 0 ? 'all' : 'guitar')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add Chart</span>
+                  </button>
+                </div>
+              </div>
+
+              {instrumentCharts.length === 0 ? (
+                <div className="p-3 rounded-lg border border-dashed border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/60 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Optional chord-above-lyric or cue maps per instrument (Full Band, Guitar, Keys, Bass, Drums).
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(['guitar', 'piano', 'bass', 'drums'] as ChartInstrumentType[]).map((inst) => (
+                      <button
+                        key={inst}
+                        type="button"
+                        onClick={() => handleAddInstrumentChart(inst)}
+                        className="px-2 py-1 text-[11px] font-semibold rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-[#1b75bc] hover:text-[#1b75bc] cursor-pointer"
+                      >
+                        + {CHART_INSTRUMENT_LABELS[inst]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Variant Selector Strip */}
+                  <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Edit instrument charts">
+                    {instrumentCharts.map((variant) => {
+                      const isActive = activeInstrumentChart?.id === variant.id;
+                      const tabLabel = variant.label?.trim()
+                        ? `${CHART_INSTRUMENT_LABELS[variant.instrument]} (${variant.label.trim()})`
+                        : CHART_INSTRUMENT_LABELS[variant.instrument];
+                      return (
+                        <div key={variant.id} className="inline-flex items-center">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            onClick={() => setActiveChartId(variant.id)}
+                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-l-lg border transition-colors cursor-pointer ${
+                              isActive
+                                ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {tabLabel}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInstrumentChart(variant.id)}
+                            aria-label={`Remove ${tabLabel} chart`}
+                            title={`Remove ${tabLabel}`}
+                            className={`px-1.5 py-1 rounded-r-lg border-y border-r transition-colors cursor-pointer ${
+                              isActive
+                                ? 'bg-[#165d97] text-white/90 hover:text-white border-[#1b75bc]'
+                                : 'bg-white dark:bg-slate-900 text-slate-400 hover:text-rose-500 border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Active Chart Variant Editor */}
+                  {activeInstrumentChart && (
+                    <div className="space-y-2.5 p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Instrument
+                          </label>
+                          <select
+                            value={activeInstrumentChart.instrument}
+                            onChange={(e) => {
+                              const nextInst = e.target.value as ChartInstrumentType;
+                              handleUpdateActiveChart({
+                                instrument: nextInst,
+                                ...(!isCapoSupportedInstrument(nextInst) ? { capo: undefined } : {})
+                              });
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none"
+                          >
+                            {VALID_CHART_INSTRUMENTS.map((inst) => (
+                              <option key={inst} value={inst}>
+                                {CHART_INSTRUMENT_LABELS[inst]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Variant Label
+                          </label>
+                          <input
+                            type="text"
+                            value={activeInstrumentChart.label || ''}
+                            onChange={(e) => handleUpdateActiveChart({ label: e.target.value })}
+                            placeholder="e.g. Lead Electric, Acoustic"
+                            maxLength={80}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-[#1b75bc]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Chart Key (Override)
+                          </label>
+                          <input
+                            type="text"
+                            disabled={!isPitchedChartInstrument(activeInstrumentChart.instrument)}
+                            value={activeInstrumentChart.key || ''}
+                            onChange={(e) => handleUpdateActiveChart({ key: e.target.value })}
+                            placeholder={originalKey.trim() ? `Default: ${originalKey.trim()}` : 'e.g. G, Bb, Em'}
+                            maxLength={20}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-[#1b75bc] disabled:opacity-50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Capo / Tuning
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={0}
+                              max={12}
+                              disabled={!isCapoSupportedInstrument(activeInstrumentChart.instrument)}
+                              value={activeInstrumentChart.capo ?? ''}
+                              onChange={(e) => {
+                                const raw = e.target.value.trim();
+                                handleUpdateActiveChart({
+                                  capo: raw === '' ? undefined : Math.max(0, Math.min(12, parseInt(raw, 10) || 0))
+                                });
+                              }}
+                              placeholder="Capo"
+                              className="w-16 px-2 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none disabled:opacity-40"
+                            />
+                            <input
+                              type="text"
+                              value={activeInstrumentChart.tuning || ''}
+                              onChange={(e) => handleUpdateActiveChart({ tuning: e.target.value })}
+                              placeholder="Tuning"
+                              maxLength={80}
+                              className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                          Instrument Cues / Tone Notes
+                        </label>
+                        <input
+                          type="text"
+                          value={activeInstrumentChart.notes || ''}
+                          onChange={(e) => handleUpdateActiveChart({ notes: e.target.value })}
+                          placeholder="e.g. Dotted-8th delay on Chorus; warm Rhodes pad in Verse 1"
+                          maxLength={1000}
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-[#1b75bc]"
+                        />
+                      </div>
+
+                      {/* Quick Tag & Copy Structure Toolbar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Insert chart section tag">
+                          {['Intro', 'Verse', 'Chorus', 'Bridge', 'Instrumental', 'Outro'].map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => handleInsertChartSectionTag(tag)}
+                              className="px-2 py-1 text-[11px] font-semibold rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-[#1b75bc] hover:text-[#1b75bc] dark:hover:text-[#54b0e2] cursor-pointer"
+                            >
+                              + [{tag}]
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCopyLyricsToActiveChart}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>Copy Lyrics Structure</span>
+                          </button>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                            {activeInstrumentChart.content.length.toLocaleString()} / {MAX_CHART_CONTENT_LENGTH.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      <textarea
+                        ref={chartTextareaRef}
+                        rows={7}
+                        maxLength={MAX_CHART_CONTENT_LENGTH}
+                        value={activeInstrumentChart.content}
+                        onChange={(e) => handleUpdateActiveChart({ content: e.target.value })}
+                        placeholder={
+                          activeInstrumentChart.instrument === 'drums'
+                            ? `[Intro]\nKick 4-on-floor · Rim click Verse 1 (72 BPM)\n\n[Chorus]\nCrash build into full groove`
+                            : `[Intro]\nG   D/F#   Em7   Cadd9\n\n[Verse 1]\nG                D/F#\nI love You, Lord\n       Em7            C\nFor Your mercy never fails me`
+                        }
+                        className="w-full px-3 py-2.5 text-xs font-mono leading-relaxed rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none resize-y"
+                      />
+                    </div>
+                  )}
+
+                  {showChartLivePreview && instrumentCharts.some((c) => c.content.trim().length > 0) && (
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                      <ChordChartViewer
+                        charts={instrumentCharts.filter((c) => c.content.trim().length > 0)}
+                        baseKey={originalKey.trim() || key.trim()}
+                        initialCapo={capo.trim() ? parseInt(capo, 10) || 0 : 0}
+                        preferredInstrument={activeInstrumentChart?.instrument}
+                        maxHeightClass="max-h-72"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Song Status: ORIGINAL / COVER */}
@@ -889,6 +1748,158 @@ export const SongFormModal: React.FC<SongFormModalProps> = ({
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Arrangement & Variant Tracking */}
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Arrangement & Band Specs</span>
+                </label>
+                <span className="text-[10px] text-slate-400">Variant & rehearsal instructions</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Arrangement Label
+                  </label>
+                  <input
+                    type="text"
+                    value={arrangementName}
+                    onChange={(e) => setArrangementName(e.target.value)}
+                    placeholder="e.g. Acoustic Set 2026, Bethel Live"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Capo (Fret)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="12"
+                    value={capo}
+                    onChange={(e) => setCapo(e.target.value)}
+                    placeholder="e.g. 2, 4 (0 if none)"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Tuning
+                  </label>
+                  <input
+                    type="text"
+                    value={tuning}
+                    onChange={(e) => setTuning(e.target.value)}
+                    placeholder="e.g. Standard, Drop D, Eb"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Band Rehearsal Directives
+                </label>
+                <textarea
+                  rows={2}
+                  value={rehearsalNotes}
+                  onChange={(e) => setRehearsalNotes(e.target.value)}
+                  placeholder="e.g. Acoustic guitar and pads start verse 1; drums enter on chorus 2; build to full band on bridge."
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              {/* YouTube Rehearsal Timestamp Markers (HX-04) */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Youtube className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                    <span>Reference Video Section Cues ({videoMarkers.length} / {MAX_VIDEO_MARKERS_PER_SONG})</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400">Jump straight to sections in YouTube</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={markerTimeInput}
+                    onChange={(e) => setMarkerTimeInput(e.target.value)}
+                    placeholder="mm:ss (e.g. 1:42)"
+                    className="w-28 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-[#1b75bc]"
+                  />
+                  <input
+                    type="text"
+                    value={markerLabelInput}
+                    onChange={(e) => setMarkerLabelInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddVideoMarker();
+                      }
+                    }}
+                    placeholder="Section label (e.g. Bridge Build)"
+                    maxLength={80}
+                    className="flex-1 min-w-[160px] px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-[#1b75bc]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddVideoMarker}
+                    disabled={videoMarkers.length >= MAX_VIDEO_MARKERS_PER_SONG}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-lg cursor-pointer disabled:opacity-40"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Cue</span>
+                  </button>
+                </div>
+
+                {videoMarkers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {videoMarkers.map((marker) => {
+                      const jumpUrl = buildYouTubeTimestampUrl(youtubeUrl, youtubeId, marker.timeSeconds);
+                      return (
+                        <div
+                          key={marker.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <span className="font-mono font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums">
+                            {formatMarkerTimestamp(marker.timeSeconds)}
+                          </span>
+                          {jumpUrl ? (
+                            <a
+                              href={jumpUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-slate-700 dark:text-slate-200 hover:underline"
+                              title={`Open YouTube at ${formatMarkerTimestamp(marker.timeSeconds)}`}
+                            >
+                              {marker.label}
+                            </a>
+                          ) : (
+                            <span className="font-medium text-slate-700 dark:text-slate-200">
+                              {marker.label}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveVideoMarker(marker.id)}
+                            aria-label={`Remove cue ${marker.label}`}
+                            className="text-slate-400 hover:text-rose-500 cursor-pointer ml-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 

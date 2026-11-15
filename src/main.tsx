@@ -1,20 +1,44 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import { StrictMode, Suspense, lazy } from 'react';
+import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { OverlayProvider } from './context/OverlayContext';
-import { StorageService } from './services/storage';
+import { getLyricsOutputSessionFromLocation } from './utils/lyricsPresentationChannel';
 import './index.css';
 
-// Immediately apply accessibility settings before initial render
-StorageService.applyAccessibilityToDOM(StorageService.getAccessibilitySettings());
+const LyricsAudienceOutput = lazy(() =>
+  import('./components/LyricsAudienceOutput').then((m) => ({ default: m.LyricsAudienceOutput }))
+);
+
+const MainWorkspace = lazy(async () => {
+  const [{ default: App }, { OverlayProvider }, { StorageService }] = await Promise.all([
+    import('./App.tsx'),
+    import('./context/OverlayContext'),
+    import('./services/storage')
+  ]);
+  StorageService.applyAccessibilityToDOM(StorageService.getAccessibilitySettings());
+  return {
+    default: () => (
+      <OverlayProvider>
+        <App />
+      </OverlayProvider>
+    )
+  };
+});
+
+const audienceOutputSessionId = getLyricsOutputSessionFromLocation();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <OverlayProvider>
-        <App />
-      </OverlayProvider>
+      {audienceOutputSessionId ? (
+        <Suspense fallback={<div className="fixed inset-0 bg-black" />}>
+          <LyricsAudienceOutput sessionId={audienceOutputSessionId} />
+        </Suspense>
+      ) : (
+        <Suspense fallback={<div className="fixed inset-0 bg-black" />}>
+          <MainWorkspace />
+        </Suspense>
+      )}
     </ErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
 );
+

@@ -152,12 +152,12 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             /* Vertical Navigation: Section Path, Page Title & Subtitle */
             <div className="min-w-0 py-0.5">
-              <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-0.5">
                 <span>WWCF</span>
                 <span>/</span>
                 <span className="text-[#1b75bc] dark:text-[#54b0e2]">{current.section}</span>
               </div>
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
+              <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
                 {current.title}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium hidden md:block truncate mt-0.5">
@@ -168,15 +168,15 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Section: Actions */}
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Draft Saved Indicator in Scheduler */}
-          {activeTab === 'scheduler' && (
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Draft Saved Indicator in Scheduler - Conditionally mounted to prevent layout gap */}
+          {activeTab === 'scheduler' && isDraftSaved && (
             <div
-              className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-600 dark:text-emerald-400 transition-opacity duration-200 ${
-                isDraftSaved ? 'opacity-100' : 'opacity-0 pointer-events-none'
-              }`}
+              role="status"
+              aria-live="polite"
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold tracking-wide text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-lg animate-in fade-in duration-200"
             >
-              <Check className="w-3.5 h-3.5" />
+              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Draft Saved</span>
             </div>
           )}
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* App-Wide Undo and Redo Controls */}
           {onUndo && onRedo && (
-            <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 rounded-xl bg-slate-100/70 dark:bg-white/5 border border-slate-200/60 dark:border-white/5">
+            <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 rounded-xl bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10">
               <button
                 type="button"
                 onClick={onUndo}
@@ -226,8 +226,8 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={undoTitle || (canUndo ? 'Undo last change (Ctrl+Z)' : 'Nothing to undo')}
                 className={`p-1.5 sm:p-2 rounded-lg text-xs font-semibold transition-all ${
                   canUndo
-                    ? 'text-slate-700 dark:text-slate-200 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-white dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-2xs'
-                    : 'text-slate-300 dark:text-white/20 cursor-not-allowed opacity-40'
+                    ? 'text-slate-800 dark:text-slate-100 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-white dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-xs'
+                    : 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
                 }`}
               >
                 <Undo2 className="w-4 h-4" />
@@ -242,8 +242,8 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={redoTitle || (canRedo ? 'Redo change (Ctrl+Y / Ctrl+Shift+Z)' : 'Nothing to redo')}
                 className={`p-1.5 sm:p-2 rounded-lg text-xs font-semibold transition-all ${
                   canRedo
-                    ? 'text-slate-700 dark:text-slate-200 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-white dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-2xs'
-                    : 'text-slate-300 dark:text-white/20 cursor-not-allowed opacity-40'
+                    ? 'text-slate-800 dark:text-slate-100 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-white dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-xs'
+                    : 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
                 }`}
               >
                 <Redo2 className="w-4 h-4" />
@@ -256,10 +256,11 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onNewSchedule}
             data-tour="header-new-lineup-btn"
-            className="btn-tactile flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#164f7c] rounded-xl shadow-xs shadow-[#1b75bc]/25 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+            className="btn-tactile flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 min-h-[38px] sm:min-h-[40px] text-xs sm:text-sm font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] rounded-xl shadow-xs shadow-[#1b75bc]/25 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] shrink-0"
           >
             <Plus className="w-4 h-4 shrink-0" />
-            <span>New Lineup</span>
+            <span className="hidden sm:inline">New Lineup</span>
+            <span className="inline sm:hidden">New</span>
           </button>
         </div>
       </div>

@@ -150,6 +150,16 @@ export function formatAssignmentMemberNames(a: MinistryAssignment): string {
   return cleanNames.length > 0 ? cleanNames.join(', ') : 'N/A';
 }
 
+export interface RehearsalChecklist {
+  songSelectionFinalized: boolean;
+  performedKeysChecked: boolean;
+  lyricsReviewed: boolean;
+  referencesChecked: boolean;
+  teamAssignmentsFinalized: boolean;
+  transitionsPrepared: boolean;
+  updatedAt?: string;
+}
+
 export interface Schedule {
   id: string;
   serviceType: ServiceType;
@@ -161,6 +171,54 @@ export interface Schedule {
   praiseSongIds?: string[];
   worshipSongIds?: string[];
   ministryAssignments: MinistryAssignment[];
+  notes?: string;
+  transitionNotes?: Record<string, string>;
+  rehearsalChecklist?: RehearsalChecklist;
+  noService?: boolean;
+  noServiceReason?: string;
+  updatedAt: string;
+}
+
+export interface LineupTemplate {
+  id: string;
+  name: string;
+  serviceType: ServiceType;
+  description?: string;
+  praiseSongs: string[];
+  worshipSongs: string[];
+  praiseSongIds?: (string | undefined)[];
+  worshipSongIds?: (string | undefined)[];
+  praiseSongKeys?: string[];
+  worshipSongKeys?: string[];
+  ministryRoles?: string[];
+  ministryAssignments?: MinistryAssignment[];
+  notes?: string;
+  transitionNotes?: Record<string, string>;
+  isDefault?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type AvailabilityStatus = 'available' | 'unavailable' | 'maybe';
+
+export interface MemberAvailability {
+  id: string;
+  memberId: string;
+  date: string; // YYYY-MM-DD
+  serviceType?: string;
+  status: AvailabilityStatus;
+  note?: string;
+  updatedAt: string;
+}
+
+export type FamiliarityLevel = 'unfamiliar' | 'learning' | 'familiar' | 'confident';
+
+export interface SongFamiliarity {
+  id: string; // Composite: `${memberId}_${songId}`
+  memberId: string;
+  songId: string;
+  level: FamiliarityLevel;
   notes?: string;
   updatedAt: string;
 }
@@ -186,6 +244,9 @@ export interface SongVersionRef {
   relationshipType: SongRelationshipType;
   notes?: string;
   confidence?: 'high' | 'medium' | 'low';
+  arrangementName?: string;
+  capo?: number;
+  tuning?: string;
 }
 
 export interface SongFamily {
@@ -203,6 +264,33 @@ export interface ServiceUsageHistory {
   date: string;
   serviceType: string;
   scheduleId?: string;
+}
+
+export type ChartInstrumentType =
+  | 'all'
+  | 'guitar'
+  | 'piano'
+  | 'bass'
+  | 'drums'
+  | 'vocals'
+  | 'other';
+
+export interface InstrumentChartVariant {
+  id: string;
+  instrument: ChartInstrumentType;
+  label?: string;
+  content: string;
+  key?: string;
+  capo?: number;
+  tuning?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface SongVideoMarker {
+  id: string;
+  label: string;
+  timeSeconds: number;
 }
 
 export interface Song {
@@ -245,6 +333,15 @@ export interface Song {
   songwriters?: string;
   composers?: string[];
   originalArtist?: string;
+  // Arrangement & Variant Tracking
+  arrangementName?: string;
+  capo?: number;
+  tuning?: string;
+  rehearsalNotes?: string;
+  // Instrument-specific chord/cue charts (HX-01)
+  instrumentCharts?: InstrumentChartVariant[];
+  // Timestamped YouTube section cues (HX-04)
+  videoMarkers?: SongVideoMarker[];
 }
 
 export type SongConflictType =

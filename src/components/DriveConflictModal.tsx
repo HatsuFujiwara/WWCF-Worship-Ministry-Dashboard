@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
 import { RemoteConflictPayload, GoogleAuthService } from '../services/googleAuthService';
+import { BackupValidationService } from '../services/backupValidationService';
 import {
   AlertTriangle,
   GitMerge,
@@ -62,8 +63,9 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
       try {
         setIsResolving(true);
         const content = await GoogleAuthService.readDriveBackupContent(token, fileId);
-        if (!content || typeof content !== 'object' || (!content.data && !content.members && !content.songs)) {
-          throw new Error('Selected candidate does not contain a valid WWCF backup envelope');
+        const validation = BackupValidationService.validate(content);
+        if (!validation.isValid || !validation.envelope) {
+          throw new Error(validation.error || 'Selected candidate does not contain a valid WWCF backup envelope');
         }
         // ONLY commit persisted pointer after content is read and validated
         GoogleAuthService.setPersistedDriveFileId(fileId);

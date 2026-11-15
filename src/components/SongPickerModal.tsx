@@ -30,7 +30,7 @@ interface SongPickerModalProps {
   allSongs: Song[];
   schedules: Schedule[];
   excludeScheduleId?: string;
-  onSelectSong: (songTitle: string) => void;
+  onSelectSong: (songTitle: string, song?: Song) => void;
   onClose: () => void;
   onAddNewSong: () => void;
   onImportYouTubeSong?: () => void;
@@ -85,7 +85,7 @@ export const SongPickerModal: React.FC<SongPickerModalProps> = ({
     }
 
     // Badge filter
-    const usageCheck = SongService.checkMonthlyUsage(s.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs);
+    const usageCheck = SongService.checkMonthlyUsage(s.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs, undefined, s.id);
     const effectiveStats = SongFamilyService.getEffectiveUsageStats(s, allSongs);
     if (selectedBadgeFilter === 'used_this_month' && usageCheck.timesUsedThisMonth === 0) {
       return false;
@@ -288,14 +288,14 @@ export const SongPickerModal: React.FC<SongPickerModalProps> = ({
             </div>
           ) : (
             filtered.map((song) => {
-              const usageCheck = SongService.checkMonthlyUsage(song.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs);
+              const usageCheck = SongService.checkMonthlyUsage(song.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs, undefined, song.id);
               const effectiveStats = SongFamilyService.getEffectiveUsageStats(song, allSongs);
               const isFamily = effectiveStats.isFamilyMember;
               return (
                 <div
                   key={song.id}
                   onClick={() => {
-                    onSelectSong(song.title);
+                    onSelectSong(song.title, song);
                     onClose();
                   }}
                   className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-500 dark:hover:border-indigo-500 hover:shadow-xs transition-all flex items-center justify-between gap-3 cursor-pointer group"

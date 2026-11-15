@@ -6,7 +6,7 @@ import {
   isDateInCurrentManilaMonth,
   getManilaCurrentMonthLabel
 } from '../utils/dateUtils';
-import { isScheduleEmpty, ensureMonthlyPlaceholders } from '../utils/scheduleUtils';
+import { isScheduleEmpty, isNoServiceSchedule, isPopulatedSchedule, getScheduleStatus, ensureMonthlyPlaceholders } from '../utils/scheduleUtils';
 import { calculateSongAnalytics } from '../utils/songAnalyticsUtils';
 import { resolveScheduleSongTitles } from '../utils/songResolveUtils';
 import { MemberFavoriteSongsSection } from './MemberFavoriteSongsSection';
@@ -14,6 +14,7 @@ import {
   Users,
   CalendarCheck,
   CalendarX,
+  Ban,
   Music,
   Plus,
   ArrowRight,
@@ -85,19 +86,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return getManilaCurrentMonthLabel(todayManila);
   }, [todayManila]);
 
-  // Overall Saved vs Empty classification (Saved = >= 1 song, Empty = 0 songs)
+  // Overall Saved vs Empty vs No Service classification
   const totalSavedLineups = useMemo(() => {
-    return schedules.filter((s) => !isScheduleEmpty(s)).length;
+    return schedules.filter((s) => isPopulatedSchedule(s)).length;
   }, [schedules]);
 
   const totalEmptyLineups = useMemo(() => {
     return schedules.filter((s) => isScheduleEmpty(s)).length;
   }, [schedules]);
 
+  const totalNoServiceLineups = useMemo(() => {
+    return schedules.filter((s) => isNoServiceSchedule(s)).length;
+  }, [schedules]);
+
   // Sunday Service lineups (CURRENT MONTH & CURRENT YEAR ONLY)
   const sundaySaved = useMemo(() => {
     return currentMonthSchedules
-      .filter((s) => s.serviceType === 'Sunday Service' && !isScheduleEmpty(s))
+      .filter((s) => s.serviceType === 'Sunday Service' && isPopulatedSchedule(s))
       .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
   }, [currentMonthSchedules]);
 
@@ -107,16 +112,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
   }, [currentMonthSchedules]);
 
+  const sundayNoService = useMemo(() => {
+    return currentMonthSchedules
+      .filter((s) => s.serviceType === 'Sunday Service' && isNoServiceSchedule(s))
+      .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+  }, [currentMonthSchedules]);
+
   // Midweek Prayer Service lineups (CURRENT MONTH & CURRENT YEAR ONLY)
   const midweekSaved = useMemo(() => {
     return currentMonthSchedules
-      .filter((s) => s.serviceType === 'Midweek Prayer Service' && !isScheduleEmpty(s))
+      .filter((s) => s.serviceType === 'Midweek Prayer Service' && isPopulatedSchedule(s))
       .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
   }, [currentMonthSchedules]);
 
   const midweekEmpty = useMemo(() => {
     return currentMonthSchedules
       .filter((s) => s.serviceType === 'Midweek Prayer Service' && isScheduleEmpty(s))
+      .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+  }, [currentMonthSchedules]);
+
+  const midweekNoService = useMemo(() => {
+    return currentMonthSchedules
+      .filter((s) => s.serviceType === 'Midweek Prayer Service' && isNoServiceSchedule(s))
       .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
   }, [currentMonthSchedules]);
 
@@ -156,10 +173,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const totalUniqueSongs = songAnalytics.totalUniqueSongs;
 
-  // Recent Saved Lineups (only lineups with songs)
+  // Recent Saved Lineups (only populated lineups with songs)
   const recentSavedSchedules = useMemo(() => {
     return schedules
-      .filter((s) => !isScheduleEmpty(s))
+      .filter((s) => isPopulatedSchedule(s))
       .sort((a, b) => (b.serviceDate || '').localeCompare(a.serviceDate || ''))
       .slice(0, 4);
   }, [schedules]);
@@ -176,10 +193,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const upcomingDetails = useMemo(() => {
     if (!upcomingSchedule) return null;
+    const status = getScheduleStatus(upcomingSchedule);
     const praiseCount = upcomingSchedule.praiseSongs?.filter((s) => Boolean(s.trim())).length || 0;
     const worshipCount = upcomingSchedule.worshipSongs?.filter((s) => Boolean(s.trim())).length || 0;
     const totalSongs = praiseCount + worshipCount;
-    const isEmpty = totalSongs === 0;
+    const isEmpty = status === 'empty';
+    const isNoService = status === 'no_service';
 
     const leaderAssignments = (upcomingSchedule.ministryAssignments || []).filter((m) =>
       (m.role || '').toLowerCase().includes('leader')
@@ -190,10 +209,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .join(', ');
 
     return {
+      status,
       totalSongs,
       praiseCount,
       worshipCount,
       isEmpty,
+      isNoService,
+      noServiceReason: upcomingSchedule.noServiceReason?.trim() || '',
       leaderNames: leaderNames || 'None Assigned'
     };
   }, [upcomingSchedule]);
@@ -246,20 +268,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   {upcomingSchedule?.serviceType || 'Sunday Service'}
                 </span>
                 <span>•</span>
-                <span>Song Leaders: <strong className="text-slate-800 dark:text-slate-200">{upcomingDetails?.leaderNames || 'Pending'}</strong></span>
+                {upcomingDetails?.isNoService ? (
+                  <span>Status: <strong className="text-rose-600 dark:text-rose-400">No Service</strong></span>
+                ) : (
+                  <span>Song Leaders: <strong className="text-slate-800 dark:text-slate-200">{upcomingDetails?.leaderNames || 'Pending'}</strong></span>
+                )}
               </div>
             </div>
 
             {/* Readiness Summary Banner */}
             <div className="flex items-center gap-3 pt-1">
-              {upcomingDetails?.isEmpty ? (
+              {upcomingDetails?.isNoService ? (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                  <Ban className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    No Service Scheduled{upcomingDetails.noServiceReason ? ` — ${upcomingDetails.noServiceReason}` : ''}
+                  </span>
+                </div>
+              ) : upcomingDetails?.isEmpty ? (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
-                  <CalendarX className="w-4 h-4" />
+                  <CalendarX className="w-4 h-4" aria-hidden="true" />
                   <span>Lineup Not Started (0 Songs Added)</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
-                  <BookmarkCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <BookmarkCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
                   <span>
                     Lineup Prepared: {upcomingDetails?.totalSongs} Songs ({upcomingDetails?.praiseCount} Praise, {upcomingDetails?.worshipCount} Worship)
                   </span>
@@ -276,7 +309,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 onClick={() => handleLineupClick(upcomingSchedule)}
                 className="btn-tactile inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] text-white text-sm font-bold shadow-md shadow-[#1b75bc]/25 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
               >
-                <span>{upcomingDetails?.isEmpty ? 'Build This Lineup' : 'Review & Edit Lineup'}</span>
+                <span>
+                  {upcomingDetails?.isNoService
+                    ? 'Review Service Status'
+                    : upcomingDetails?.isEmpty
+                    ? 'Build This Lineup'
+                    : 'Review & Edit Lineup'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}
@@ -297,44 +336,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ========================================================================= */}
       {/* 2. COMPACT MINISTRY METRIC BAR (NO EXCESSIVE ISOLATED CARDS)              */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div data-tour="dashboard-saved-card" className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-            <BookmarkCheck className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <BookmarkCheck className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Saved</p>
-            <h4 className="text-lg font-black text-slate-900 dark:text-slate-100">{totalSavedLineups}</h4>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Saved</p>
+            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalSavedLineups}</h4>
           </div>
         </div>
 
         <div data-tour="dashboard-empty-card" className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-            <CalendarX className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <CalendarX className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Empty</p>
-            <h4 className="text-lg font-black text-slate-900 dark:text-slate-100">{totalEmptyLineups}</h4>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Empty</p>
+            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalEmptyLineups}</h4>
           </div>
         </div>
 
         <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
-            <Users className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+            <Ban className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Team Roster</p>
-            <h4 className="text-lg font-black text-slate-900 dark:text-slate-100">{members.length}</h4>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">No Service</p>
+            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalNoServiceLineups}</h4>
           </div>
         </div>
 
         <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
-            <Music className="w-4 h-4" />
+          <div className="w-10 h-10 rounded-xl bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Active Songs</p>
-            <h4 className="text-lg font-black text-slate-900 dark:text-slate-100">{totalUniqueSongs}</h4>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Team Roster</p>
+            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{members.length}</h4>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3 col-span-2 sm:col-span-1">
+          <div className="w-10 h-10 rounded-xl bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
+            <Music className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Active Songs</p>
+            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalUniqueSongs}</h4>
           </div>
         </div>
       </div>
@@ -359,7 +408,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Sunday Service
                 </h3>
               </div>
-              <div className="flex items-center gap-2 text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                 <span className="text-emerald-700 dark:text-emerald-400">
                   {sundaySaved.length} Saved
                 </span>
@@ -367,6 +416,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-amber-700 dark:text-amber-400">
                   {sundayEmpty.length} Empty
                 </span>
+                {sundayNoService.length > 0 && (
+                  <>
+                    <span className="text-slate-300 dark:text-slate-700">·</span>
+                    <span className="text-rose-700 dark:text-rose-400">
+                      {sundayNoService.length} No Service
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -399,7 +456,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-[10px] text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
+                            <span className="text-xs text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
                               {songCount} {songCount === 1 ? 'song' : 'songs'}
                             </span>
                           </button>
@@ -436,7 +493,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <span className="text-amber-500 dark:text-amber-400 font-bold">•</span>
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold opacity-80 group-hover:opacity-100 shrink-0">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-bold opacity-90 group-hover:opacity-100 shrink-0">
                               + Add songs
                             </span>
                           </button>
@@ -447,6 +504,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 )}
               </div>
             </div>
+
+            {sundayNoService.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 dark:border-white/10 space-y-2">
+                <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                  <Ban className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>No Service ({sundayNoService.length})</span>
+                </h4>
+                <ul className="space-y-1">
+                  {sundayNoService.map((schedule) => (
+                    <li key={schedule.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleLineupClick(schedule)}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
+                      >
+                        <span className="font-semibold flex items-center gap-1.5 shrink-0">
+                          <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
+                          <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </span>
+                        <span className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold truncate">
+                          {schedule.noServiceReason?.trim() ? `No Service: ${schedule.noServiceReason.trim()}` : 'No Service'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {/* Midweek Prayer Service Card */}
@@ -458,7 +543,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Midweek Prayer Service
                 </h3>
               </div>
-              <div className="flex items-center gap-2 text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                 <span className="text-emerald-700 dark:text-emerald-400">
                   {midweekSaved.length} Saved
                 </span>
@@ -466,6 +551,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-amber-700 dark:text-amber-400">
                   {midweekEmpty.length} Empty
                 </span>
+                {midweekNoService.length > 0 && (
+                  <>
+                    <span className="text-slate-300 dark:text-slate-700">·</span>
+                    <span className="text-rose-700 dark:text-rose-400">
+                      {midweekNoService.length} No Service
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -498,7 +591,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-[10px] text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
+                            <span className="text-xs text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
                               {songCount} {songCount === 1 ? 'song' : 'songs'}
                             </span>
                           </button>
@@ -535,7 +628,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <span className="text-amber-500 dark:text-amber-400 font-bold">•</span>
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold opacity-80 group-hover:opacity-100 shrink-0">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-bold opacity-90 group-hover:opacity-100 shrink-0">
                               + Add songs
                             </span>
                           </button>
@@ -546,16 +639,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 )}
               </div>
             </div>
+
+            {midweekNoService.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 dark:border-white/10 space-y-2">
+                <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                  <Ban className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>No Service ({midweekNoService.length})</span>
+                </h4>
+                <ul className="space-y-1">
+                  {midweekNoService.map((schedule) => (
+                    <li key={schedule.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleLineupClick(schedule)}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
+                      >
+                        <span className="font-semibold flex items-center gap-1.5 shrink-0">
+                          <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
+                          <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </span>
+                        <span className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold truncate">
+                          {schedule.noServiceReason?.trim() ? `No Service: ${schedule.noServiceReason.trim()}` : 'No Service'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Custom / Other Services (if present in schedules) */}
         {otherServiceTypes.map((serviceType) => {
           const savedList = currentMonthSchedules
-            .filter((s) => s.serviceType === serviceType && !isScheduleEmpty(s))
+            .filter((s) => s.serviceType === serviceType && isPopulatedSchedule(s))
             .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
           const emptyList = currentMonthSchedules
             .filter((s) => s.serviceType === serviceType && isScheduleEmpty(s))
+            .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+          const noServiceList = currentMonthSchedules
+            .filter((s) => s.serviceType === serviceType && isNoServiceSchedule(s))
             .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
 
           return (
@@ -567,13 +691,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {serviceType}
                   </h3>
                 </div>
-                <div className="flex items-center gap-2 text-xs font-semibold">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
                     Saved ({savedList.length})
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
                     Empty ({emptyList.length})
                   </span>
+                  {noServiceList.length > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200/60 dark:border-rose-800/60">
+                      No Service ({noServiceList.length})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -648,6 +777,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   )}
                 </div>
               </div>
+
+              {noServiceList.length > 0 && (
+                <div className="pt-3 border-t border-slate-100 dark:border-white/10 space-y-2">
+                  <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                    <Ban className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>No Service ({noServiceList.length})</span>
+                  </h4>
+                  <ul className="space-y-1">
+                    {noServiceList.map((schedule) => (
+                      <li key={schedule.id}>
+                        <button
+                          type="button"
+                          onClick={() => handleLineupClick(schedule)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
+                        >
+                          <span className="font-semibold flex items-center gap-1.5 shrink-0">
+                            <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
+                            <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          </span>
+                          <span className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold truncate">
+                            {schedule.noServiceReason?.trim() ? `No Service: ${schedule.noServiceReason.trim()}` : 'No Service'}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           );
         })}

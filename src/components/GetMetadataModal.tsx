@@ -8,6 +8,7 @@ import {
 import { Modal } from './Modal';
 import { SwapTitleArtistButton } from './SwapTitleArtistButton';
 import { sanitizeSongLanguage } from '../utils/languageUtils';
+import { MAX_LYRICS_LENGTH } from '../utils/lyricsParser';
 import {
   Music,
   Sparkles,
@@ -130,7 +131,7 @@ export const GetMetadataModal: React.FC<GetMetadataModalProps> = ({
           meta.language &&
             meta.language !== sanitizeSongLanguage(song.language)
         ),
-        lyrics: Boolean(meta.lyrics && meta.lyrics !== song.lyrics),
+        lyrics: Boolean(meta.lyrics && (!song.lyrics || !song.lyrics.trim())),
         originalKey: false // NEVER automatically checked
       });
     } catch (err: any) {
@@ -239,7 +240,15 @@ export const GetMetadataModal: React.FC<GetMetadataModalProps> = ({
         updatedData.language = sanitizeSongLanguage(retrievedMeta.language);
       }
       if (selectedFields.lyrics && retrievedMeta.lyrics) {
-        updatedData.lyrics = retrievedMeta.lyrics;
+        const trimmedLyrics = retrievedMeta.lyrics.trim();
+        if (trimmedLyrics.length > MAX_LYRICS_LENGTH) {
+          showToast(
+            `Retrieved lyrics exceed the ${MAX_LYRICS_LENGTH.toLocaleString()}-character limit (${trimmedLyrics.length.toLocaleString()} characters). Deselect lyrics or shorten them after manual paste.`,
+            'danger'
+          );
+          return;
+        }
+        updatedData.lyrics = trimmedLyrics;
       }
       // ONLY update originalKey if user explicitly checked it
       if (selectedFields.originalKey && retrievedMeta.originalKey) {
@@ -571,6 +580,11 @@ export const GetMetadataModal: React.FC<GetMetadataModalProps> = ({
                 checked={selectedFields.lyrics}
                 onChange={() => toggleField('lyrics')}
                 disabled={!retrievedMeta.lyrics}
+                warning={
+                  song.lyrics && song.lyrics.trim()
+                    ? 'Existing lyrics are unchecked by default to protect curated projection slides.'
+                    : undefined
+                }
               />
 
               {/* 12. Original Key (CRITICAL: Protected & Unchecked by default) */}

@@ -1,12 +1,15 @@
 import { Song, Schedule, SongCategory, SongFamily, SongConflictResult, SongConflictType, SongRelationshipType, SongVersionType } from '../types';
 import { DEFAULT_SONGS } from '../data/songSeedData';
 import { getManilaTodayString, getManilaNowISO } from '../utils/dateUtils';
-import { isFirstRegularServiceOfMonth, getLastRegularSchedulesOfPreviousMonth } from '../utils/scheduleUtils';
+import { isFirstRegularServiceOfMonth, getLastRegularSchedulesOfPreviousMonth, isNoServiceSchedule } from '../utils/scheduleUtils';
 import { isSpecialEvent, isFirstWeekOfMonth, getLastWeekOfPreviousMonthRange } from '../utils/recommendationUtils';
 import { sanitizeSongLanguage, detectSongLanguage } from '../utils/languageUtils';
 import { getNormalizedBaseTitle, areArtistsEquivalent, verifySongIdentity, calculateLyricsSimilarity } from '../utils/songFamilyUtils';
-import { StorageService } from './storage';
-import { syncSchedulesOnSongRename } from '../utils/songResolveUtils';
+import { StorageService, quarantineCorruptStorage } from './storage';
+import { syncSchedulesOnSongRename, resolveSlotSong } from '../utils/songResolveUtils';
+import { MAX_LYRICS_LENGTH } from '../utils/lyricsParser';
+import { sanitizeInstrumentCharts, validateInstrumentCharts } from '../utils/chordChartUtils';
+import { sanitizeVideoMarkers, validateVideoMarkers } from '../utils/videoMarkerUtils';
 
 const SONGS_STORAGE_KEY = 'wwcf_songs_v1';
 
@@ -56,23 +59,64 @@ export function extractYouTubeId(urlStr: string): string | null {
 }
 
 /**
- * Asynchronous SongService layer structured for easy migration to Firebase/Supabase
+ * Asynchronous SongService layer for local-first catalog persistence.
  */
 export class SongService {
+  private static sanitizeStoredSong(raw: any): Song | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : '';
+    const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : '';
+    if (!id || !title) return null;
+    return {
+      ...raw,
+      id,
+      title,
+      artist: typeof raw.artist === 'string' && raw.artist.trim() ? raw.artist : 'Unknown Artist',
+      language: typeof raw.language === 'string' ? raw.language : 'English',
+      category: raw.category === 'praise' || raw.category === 'worship' || raw.category === 'both' ? raw.category : 'both',
+      timesUsed: typeof raw.timesUsed === 'number' && !isNaN(raw.timesUsed) ? raw.timesUsed : 0,
+      serviceHistory: Array.isArray(raw.serviceHistory) ? raw.serviceHistory : [],
+      dateAdded: typeof raw.dateAdded === 'string' ? raw.dateAdded : '',
+      ...(Array.isArray(raw.instrumentCharts)
+        ? { instrumentCharts: sanitizeInstrumentCharts(raw.instrumentCharts) }
+        : {}),
+      ...(Array.isArray(raw.videoMarkers)
+        ? { videoMarkers: sanitizeVideoMarkers(raw.videoMarkers) }
+        : {})
+    };
+  }
+
   /**
    * Synchronously retrieves all songs from storage for synchronous calculation utilities
    */
   static getSongsSync(): Song[] {
     try {
       const data = localStorage.getItem(SONGS_STORAGE_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        quarantineCorruptStorage(SONGS_STORAGE_KEY, data, 'Stored song catalog is corrupted (not an array).');
+        return [];
       }
-      return [];
-    } catch {
+      const valid = parsed
+        .map((item) => this.sanitizeStoredSong(item))
+        .filter((item): item is Song => item !== null);
+      if (valid.length < parsed.length) {
+        quarantineCorruptStorage(
+          SONGS_STORAGE_KEY,
+          data,
+          `Skipped ${parsed.length - valid.length} malformed song record(s) while preserving valid catalog entries.`
+        );
+      }
+      return valid;
+    } catch (e) {
+      try {
+        const data = localStorage.getItem(SONGS_STORAGE_KEY);
+        if (data) {
+          quarantineCorruptStorage(SONGS_STORAGE_KEY, data, 'Stored song catalog JSON could not be parsed.');
+        }
+      } catch {}
+      console.error('Error reading songs synchronously:', e);
       return [];
     }
   }
@@ -83,12 +127,15 @@ export class SongService {
   static async saveSongsList(songs: Song[]): Promise<void> {
     try {
       localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
+      const verified = localStorage.getItem(SONGS_STORAGE_KEY);
+      if (verified === null) throw new Error('Persistence verification failed for songs catalog.');
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('wwcf:songs-updated', { detail: songs }));
         window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'songs' } }));
       }
     } catch (e) {
       console.error('Error saving songs list:', e);
+      throw e;
     }
   }
 
@@ -98,34 +145,57 @@ export class SongService {
   static async getSongs(): Promise<Song[]> {
     try {
       const data = localStorage.getItem(SONGS_STORAGE_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) {
-          let hasMigrationUpdates = false;
-          const sanitized = parsed.map((s: Song) => {
-            const rawLang = s.language || '';
-            if (rawLang.toLowerCase() === 'cebuano') {
-              hasMigrationUpdates = true;
-              const detected = detectSongLanguage(s.title, s.lyrics);
-              return {
-                ...s,
-                language: detected.confidence === 'high' ? detected.language : 'Tagalog'
-              };
-            }
-            return {
-              ...s,
-              language: sanitizeSongLanguage(s.language)
-            };
-          });
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) {
+        quarantineCorruptStorage(SONGS_STORAGE_KEY, data, 'Stored song catalog is corrupted (not an array).');
+        return [];
+      }
 
-          if (hasMigrationUpdates) {
-            localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(sanitized));
-          }
-          return sanitized;
+      let hasMigrationUpdates = false;
+      let droppedCount = 0;
+      const sanitized: Song[] = [];
+
+      for (const rawItem of parsed) {
+        const s = this.sanitizeStoredSong(rawItem);
+        if (!s) {
+          droppedCount++;
+          continue;
+        }
+        const rawLang = s.language || '';
+        if (rawLang.toLowerCase() === 'cebuano') {
+          hasMigrationUpdates = true;
+          const detected = detectSongLanguage(s.title, s.lyrics);
+          sanitized.push({
+            ...s,
+            language: detected.confidence === 'high' ? detected.language : 'Tagalog'
+          });
+        } else {
+          sanitized.push({
+            ...s,
+            language: sanitizeSongLanguage(s.language)
+          });
         }
       }
-      return [];
+
+      if (droppedCount > 0) {
+        quarantineCorruptStorage(
+          SONGS_STORAGE_KEY,
+          data,
+          `Skipped ${droppedCount} malformed song record(s) while preserving valid catalog entries.`
+        );
+      } else if (hasMigrationUpdates) {
+        localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(sanitized));
+      }
+
+      return sanitized;
     } catch (e) {
+      try {
+        const data = localStorage.getItem(SONGS_STORAGE_KEY);
+        if (data) {
+          quarantineCorruptStorage(SONGS_STORAGE_KEY, data, 'Stored song catalog JSON could not be parsed.');
+        }
+      } catch {}
       console.error('Error fetching songs:', e);
       return [];
     }
@@ -159,14 +229,42 @@ export class SongService {
     const songs = await this.getSongs();
     let savedSong: Song;
     let oldTitle: string | undefined = undefined;
+    let oldLyrics: string | undefined = undefined;
 
     const sanitizedLang = sanitizeSongLanguage(songData.language || 'English');
+    let boundedLyrics: string | undefined = undefined;
+    if (typeof songData.lyrics === 'string') {
+      const trimmedLyrics = songData.lyrics.trim();
+      if (trimmedLyrics.length > MAX_LYRICS_LENGTH) {
+        throw new Error(
+          `Lyrics exceed the ${MAX_LYRICS_LENGTH.toLocaleString()}-character maximum (${trimmedLyrics.length.toLocaleString()} characters).`
+        );
+      }
+      boundedLyrics = trimmedLyrics || undefined;
+    }
 
     if (songData.id) {
       // Update existing
       const index = songs.findIndex((s) => s.id === songData.id);
       const existing = index >= 0 ? songs[index] : undefined;
       oldTitle = existing?.title;
+      oldLyrics = existing?.lyrics;
+
+      const chartValidation = validateInstrumentCharts(
+        songData.instrumentCharts !== undefined ? songData.instrumentCharts : existing?.instrumentCharts,
+        songData.title.trim()
+      );
+      if (chartValidation.error) {
+        throw new Error(chartValidation.error);
+      }
+
+      const markerValidation = validateVideoMarkers(
+        songData.videoMarkers !== undefined ? songData.videoMarkers : existing?.videoMarkers,
+        songData.title.trim()
+      );
+      if (markerValidation.error) {
+        throw new Error(markerValidation.error);
+      }
 
       savedSong = {
         id: songData.id,
@@ -197,7 +295,7 @@ export class SongService {
         songwriters: songData.songwriters,
         composers: songData.composers,
         originalArtist: songData.originalArtist,
-        lyrics: songData.lyrics,
+        lyrics: boundedLyrics,
         dateAdded: songData.dateAdded || existing?.dateAdded || getManilaTodayString(),
         lastUsedDate: songData.lastUsedDate !== undefined ? songData.lastUsedDate : existing?.lastUsedDate,
         timesUsed: songData.timesUsed !== undefined ? songData.timesUsed : (existing?.timesUsed ?? 0),
@@ -206,7 +304,13 @@ export class SongService {
         category: songData.category || 'both',
         versionType: songData.versionType !== undefined ? songData.versionType : (existing?.versionType || (songData.relationshipType === 'COVER' ? 'cover' : 'original')),
         labels: songData.labels || [],
-        themes: songData.themes || []
+        themes: songData.themes || [],
+        arrangementName: songData.arrangementName?.trim() || undefined,
+        capo: typeof songData.capo === 'number' && !isNaN(songData.capo) && songData.capo >= 0 && songData.capo <= 24 ? Math.round(songData.capo) : (songData.capo ? Number(songData.capo) : undefined),
+        tuning: songData.tuning?.trim() || undefined,
+        rehearsalNotes: songData.rehearsalNotes?.trim() || undefined,
+        instrumentCharts: chartValidation.valid,
+        videoMarkers: markerValidation.valid
       };
 
       if (index >= 0) {
@@ -219,6 +323,16 @@ export class SongService {
       const newId = 'song_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
       const ytId = songData.youtubeId || (songData.youtubeUrl ? extractYouTubeId(songData.youtubeUrl) || undefined : undefined);
       
+      const chartValidation = validateInstrumentCharts(songData.instrumentCharts, songData.title.trim());
+      if (chartValidation.error) {
+        throw new Error(chartValidation.error);
+      }
+
+      const markerValidation = validateVideoMarkers(songData.videoMarkers, songData.title.trim());
+      if (markerValidation.error) {
+        throw new Error(markerValidation.error);
+      }
+
       savedSong = {
         id: newId,
         title: songData.title.trim(),
@@ -248,7 +362,7 @@ export class SongService {
         songwriters: songData.songwriters,
         composers: songData.composers,
         originalArtist: songData.originalArtist,
-        lyrics: songData.lyrics,
+        lyrics: boundedLyrics,
         dateAdded: getManilaTodayString(),
         timesUsed: 0,
         serviceHistory: [],
@@ -256,31 +370,84 @@ export class SongService {
         category: songData.category || 'both',
         versionType: songData.versionType || (songData.relationshipType === 'COVER' ? 'cover' : 'original'),
         labels: songData.labels || [],
-        themes: songData.themes || []
+        themes: songData.themes || [],
+        arrangementName: songData.arrangementName?.trim() || undefined,
+        capo: typeof songData.capo === 'number' && !isNaN(songData.capo) && songData.capo >= 0 && songData.capo <= 24 ? Math.round(songData.capo) : (songData.capo ? Number(songData.capo) : undefined),
+        tuning: songData.tuning?.trim() || undefined,
+        rehearsalNotes: songData.rehearsalNotes?.trim() || undefined,
+        instrumentCharts: chartValidation.valid,
+        videoMarkers: markerValidation.valid
       };
       songs.unshift(savedSong);
     }
 
+    const prevSongsSnapshot = localStorage.getItem(SONGS_STORAGE_KEY);
+    const prevSchedulesSnapshot = StorageService.getSchedules();
+    const prevDraftSnapshot = StorageService.getDraftSchedule();
+
     localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
 
-    // Propagate song title update across all schedules and draft
+    // Propagate song title update and selective lyrics-reviewed invalidation across schedules and draft
     if (songData.id) {
       try {
-        const existingSchedules = StorageService.getSchedules();
-        const { updatedSchedules, hasChanges } = syncSchedulesOnSongRename(oldTitle, savedSong, existingSchedules);
+        const existingSchedules = prevSchedulesSnapshot;
+        const { updatedSchedules: renamedSchedules, hasChanges: renameChanges } = syncSchedulesOnSongRename(oldTitle, savedSong, existingSchedules);
+        let workingSchedules = renameChanges ? renamedSchedules : existingSchedules;
+        let schedulesChanged = renameChanges;
 
-        if (hasChanges) {
-          StorageService.saveSchedules(updatedSchedules);
+        const lyricsChanged = (oldLyrics ?? '').trim() !== (savedSong.lyrics ?? '').trim();
+        const normOldTitle = (oldTitle || '').trim().toLowerCase();
+        const normNewTitle = savedSong.title.trim().toLowerCase();
+        const uniqueTitleInCatalog = songs.filter((s) => s.title.trim().toLowerCase() === normNewTitle).length === 1;
+
+        const slotMatchesSavedSong = (title: string, slotId?: string): boolean => {
+          if (slotId && slotId.trim()) {
+            return slotId.trim() === savedSong.id;
+          }
+          const cleanTitle = (title || '').trim().toLowerCase();
+          if (!cleanTitle) return false;
+          if (normOldTitle && cleanTitle === normOldTitle) return true;
+          return uniqueTitleInCatalog && cleanTitle === normNewTitle;
+        };
+
+        if (lyricsChanged) {
+          workingSchedules = workingSchedules.map((sch) => {
+            if (!sch.rehearsalChecklist?.lyricsReviewed) return sch;
+            const matchesPraise = (sch.praiseSongs || []).some((t, idx) =>
+              slotMatchesSavedSong(t, sch.praiseSongIds?.[idx])
+            );
+            const matchesWorship = (sch.worshipSongs || []).some((t, idx) =>
+              slotMatchesSavedSong(t, sch.worshipSongIds?.[idx])
+            );
+            if (!matchesPraise && !matchesWorship) return sch;
+
+            schedulesChanged = true;
+            const nowIso = getManilaNowISO();
+            return {
+              ...sch,
+              rehearsalChecklist: {
+                ...sch.rehearsalChecklist,
+                lyricsReviewed: false,
+                updatedAt: nowIso
+              },
+              updatedAt: nowIso
+            };
+          });
+        }
+
+        if (schedulesChanged) {
+          StorageService.saveSchedulesChecked(workingSchedules);
         }
 
         // Also update active draft if present
-        const draft = StorageService.getDraftSchedule();
+        const draft = prevDraftSnapshot;
         if (draft) {
           let draftModified = false;
           const draftPraise = (draft.praiseSongs || []).map((t, idx) => {
             const songId = (draft as any).praiseSongIds?.[idx];
-            if (songId === savedSong.id || (oldTitle && t.trim().toLowerCase() === oldTitle.trim().toLowerCase())) {
-              draftModified = true;
+            // Strictly ID-authoritative: only allow title match if draft slot had no ID
+            if (songId === savedSong.id || (!songId && oldTitle && t.trim().toLowerCase() === oldTitle.trim().toLowerCase())) {
+              if (t !== savedSong.title) draftModified = true;
               return savedSong.title;
             }
             return t;
@@ -288,35 +455,72 @@ export class SongService {
 
           const draftWorship = (draft.worshipSongs || []).map((t, idx) => {
             const songId = (draft as any).worshipSongIds?.[idx];
-            if (songId === savedSong.id || (oldTitle && t.trim().toLowerCase() === oldTitle.trim().toLowerCase())) {
-              draftModified = true;
+            // Strictly ID-authoritative: only allow title match if draft slot had no ID
+            if (songId === savedSong.id || (!songId && oldTitle && t.trim().toLowerCase() === oldTitle.trim().toLowerCase())) {
+              if (t !== savedSong.title) draftModified = true;
               return savedSong.title;
             }
             return t;
           });
 
+          let nextDraftChecklist = draft.rehearsalChecklist;
+          if (lyricsChanged && draft.rehearsalChecklist?.lyricsReviewed) {
+            const matchesDraftPraise = (draft.praiseSongs || []).some((t, idx) =>
+              slotMatchesSavedSong(t, (draft as any).praiseSongIds?.[idx])
+            );
+            const matchesDraftWorship = (draft.worshipSongs || []).some((t, idx) =>
+              slotMatchesSavedSong(t, (draft as any).worshipSongIds?.[idx])
+            );
+            if (matchesDraftPraise || matchesDraftWorship) {
+              draftModified = true;
+              nextDraftChecklist = {
+                ...draft.rehearsalChecklist,
+                lyricsReviewed: false,
+                updatedAt: getManilaNowISO()
+              };
+            }
+          }
+
           if (draftModified) {
-            StorageService.saveDraftSchedule({
+            StorageService.saveDraftScheduleChecked({
               ...draft,
               praiseSongs: draftPraise,
-              worshipSongs: draftWorship
+              worshipSongs: draftWorship,
+              rehearsalChecklist: nextDraftChecklist
             });
           }
         }
 
         // Recalculate usage statistics
-        await this.syncSongUsageFromSchedules(hasChanges ? updatedSchedules : existingSchedules);
+        await this.syncSongUsageFromSchedules(schedulesChanged ? workingSchedules : existingSchedules);
 
-        // Notify app components of rename synchronization
+        // Notify app components of rename / lyrics synchronization only after all stores committed
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('wwcf:song-renamed', {
             detail: { song: savedSong, oldTitle }
           }));
+          if (lyricsChanged) {
+            window.dispatchEvent(new CustomEvent('wwcf:song-lyrics-updated', {
+              detail: { songId: savedSong.id, title: savedSong.title }
+            }));
+          }
           window.dispatchEvent(new CustomEvent('wwcf:schedules-updated'));
           window.dispatchEvent(new CustomEvent('wwcf:songs-updated'));
         }
       } catch (err) {
-        console.error('Error synchronizing song rename across schedules:', err);
+        console.error('Error synchronizing song update across schedules; rolling back:', err);
+        try {
+          if (prevSongsSnapshot === null) {
+            localStorage.removeItem(SONGS_STORAGE_KEY);
+          } else {
+            localStorage.setItem(SONGS_STORAGE_KEY, prevSongsSnapshot);
+          }
+          StorageService.saveSchedulesChecked(prevSchedulesSnapshot);
+          StorageService.saveDraftScheduleChecked(prevDraftSnapshot);
+        } catch (rbErr) {
+          console.error('Rollback failed during saveSong recovery:', rbErr);
+        }
+        throw err;
       }
     }
 
@@ -383,22 +587,31 @@ export class SongService {
     const songs = await this.getSongs();
     const targetId = id.trim();
     const targetTitle = targetId.toLowerCase();
-
-    // Clean up song family reference if exists
-    try {
-      const { SongFamilyService } = await import('./songFamilyService');
-      const songToDelete = songs.find((s) => s.id === targetId || s.title.trim().toLowerCase() === targetTitle);
-      if (songToDelete) {
-        await SongFamilyService.unlinkSongFromFamily(songToDelete.id);
-      }
-    } catch {
-      // Ignore cleanup error if service not loaded
-    }
-
+    const { SongFamilyService } = await import('./songFamilyService');
+    const prevFamilies = await SongFamilyService.getSongFamilies();
+    const songToDelete = songs.find((s) => s.id === targetId || s.title.trim().toLowerCase() === targetTitle);
     const filtered = songs.filter(
       (s) => s.id !== targetId && s.title.trim().toLowerCase() !== targetTitle
     );
-    localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(filtered));
+
+    try {
+      if (songToDelete) {
+        await SongFamilyService.unlinkSongFromFamily(songToDelete.id);
+      }
+      localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(filtered));
+      const verified = localStorage.getItem(SONGS_STORAGE_KEY);
+      if (verified === null) throw new Error('Persistence verification failed after deleting song.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('wwcf:songs-updated', { detail: filtered }));
+        window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'songs' } }));
+      }
+    } catch (err) {
+      try {
+        await SongFamilyService.saveSongFamilies(prevFamilies);
+        localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
+      } catch {}
+      throw err;
+    }
   }
 
   /**
@@ -408,18 +621,28 @@ export class SongService {
     if (!ids || ids.length === 0) return;
     const songs = await this.getSongs();
     const idSet = new Set(ids.map((id) => id.trim()));
+    const { SongFamilyService } = await import('./songFamilyService');
+    const prevFamilies = await SongFamilyService.getSongFamilies();
 
     try {
-      const { SongFamilyService } = await import('./songFamilyService');
       for (const id of ids) {
         await SongFamilyService.unlinkSongFromFamily(id.trim());
       }
-    } catch {
-      // Ignore
+      const filtered = songs.filter((s) => !idSet.has(s.id));
+      localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(filtered));
+      const verified = localStorage.getItem(SONGS_STORAGE_KEY);
+      if (verified === null) throw new Error('Persistence verification failed after bulk deleting songs.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('wwcf:songs-updated', { detail: filtered }));
+        window.dispatchEvent(new CustomEvent('wwcf:data-changed', { detail: { type: 'songs' } }));
+      }
+    } catch (err) {
+      try {
+        await SongFamilyService.saveSongFamilies(prevFamilies);
+        localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(songs));
+      } catch {}
+      throw err;
     }
-
-    const filtered = songs.filter((s) => !idSet.has(s.id));
-    localStorage.setItem(SONGS_STORAGE_KEY, JSON.stringify(filtered));
   }
 
   /**
@@ -677,10 +900,12 @@ export class SongService {
   static getFamilySongTitles(
     songTitle: string,
     allSongs?: Song[],
-    allFamilies?: SongFamily[]
+    allFamilies?: SongFamily[],
+    songId?: string
   ): string[] {
     const cleanTitle = songTitle.trim().toLowerCase();
-    if (!cleanTitle) return [];
+    const cleanId = (songId || '').trim();
+    if (!cleanTitle && !cleanId) return [];
 
     let songs = allSongs;
     let families = allFamilies;
@@ -698,20 +923,39 @@ export class SongService {
       }
     }
 
-    const matchedSong = (songs || []).find((s) => s.id === cleanTitle || s.title.trim().toLowerCase() === cleanTitle);
+    let matchedSong: Song | undefined = undefined;
+    if (cleanId) {
+      matchedSong = (songs || []).find((s) => s.id === cleanId);
+      // Stale ID: never fall through to another song or family by title
+      if (!matchedSong) return [];
+    } else if (cleanTitle) {
+      const idDirect = (songs || []).find((s) => s.id === songTitle.trim());
+      if (idDirect) {
+        matchedSong = idDirect;
+      } else {
+        const titleMatches = (songs || []).filter((s) => s.title.trim().toLowerCase() === cleanTitle);
+        if (titleMatches.length === 1) {
+          matchedSong = titleMatches[0];
+        } else if (titleMatches.length > 1) {
+          // Ambiguous duplicate catalog titles without songId: do not guess a family
+          return [];
+        }
+      }
+    }
+
     let targetFamily: SongFamily | undefined = undefined;
 
     if (matchedSong && matchedSong.songFamilyId) {
-      targetFamily = (families || []).find((f) => f.id === matchedSong.songFamilyId);
+      targetFamily = (families || []).find((f) => f.id === matchedSong!.songFamilyId);
     }
 
     if (!targetFamily && matchedSong) {
       targetFamily = (families || []).find(
-        (f) => f.versionIds.includes(matchedSong.id) || (f.versions && f.versions.some((v) => v.songId === matchedSong.id))
+        (f) => f.versionIds.includes(matchedSong!.id) || (f.versions && f.versions.some((v) => v.songId === matchedSong!.id))
       );
     }
 
-    if (!targetFamily) {
+    if (!targetFamily && !cleanId && cleanTitle) {
       targetFamily = (families || []).find((f) => f.name.trim().toLowerCase() === cleanTitle);
     }
 
@@ -724,7 +968,9 @@ export class SongService {
         .filter((s) => familyVersionIdSet.has(s.id) || (s.songFamilyId && s.songFamilyId === targetFamily!.id))
         .map((s) => s.title.trim().toLowerCase());
 
-      if (!memberTitles.includes(cleanTitle)) {
+      if (matchedSong && !memberTitles.includes(matchedSong.title.trim().toLowerCase())) {
+        memberTitles.push(matchedSong.title.trim().toLowerCase());
+      } else if (!matchedSong && cleanTitle && !memberTitles.includes(cleanTitle)) {
         memberTitles.push(cleanTitle);
       }
       if (targetFamily.name && !memberTitles.includes(targetFamily.name.trim().toLowerCase())) {
@@ -733,7 +979,149 @@ export class SongService {
       return Array.from(new Set(memberTitles));
     }
 
-    return [cleanTitle];
+    if (matchedSong) {
+      return [matchedSong.title.trim().toLowerCase()];
+    }
+    return cleanTitle ? [cleanTitle] : [];
+  }
+
+  private static getFamilySongIdSet(
+    songTitle: string,
+    allSongs?: Song[],
+    allFamilies?: SongFamily[],
+    songId?: string
+  ): {
+    targetIds: Set<string>;
+    familyTitles: Set<string>;
+    isStaleTargetId: boolean;
+    isAmbiguousTargetTitle: boolean;
+  } {
+    const cleanTitle = songTitle.trim().toLowerCase();
+    const cleanId = (songId || '').trim();
+    const songs = allSongs ?? this.getSongsSync();
+    let families = allFamilies;
+    if (!families) {
+      try {
+        const famData = localStorage.getItem('wwcf_song_families_v1');
+        families = famData ? JSON.parse(famData) : [];
+      } catch {
+        families = [];
+      }
+    }
+
+    const targetIds = new Set<string>();
+    const familyTitles = new Set<string>();
+
+    if (cleanId) {
+      const matched = songs.find((s) => s.id === cleanId);
+      if (!matched) {
+        // Stale target ID: only match this exact ID in schedules, never bleed into same-title catalog songs
+        targetIds.add(cleanId);
+        return { targetIds, familyTitles, isStaleTargetId: true, isAmbiguousTargetTitle: false };
+      }
+      targetIds.add(matched.id);
+      familyTitles.add(matched.title.trim().toLowerCase());
+
+      const fam =
+        (matched.songFamilyId ? families.find((f) => f.id === matched.songFamilyId) : undefined) ||
+        families.find((f) => f.versionIds.includes(matched.id) || f.versions?.some((v) => v.songId === matched.id));
+
+      if (fam) {
+        (fam.versionIds || []).forEach((id) => targetIds.add(id));
+        (fam.versions || []).forEach((v) => targetIds.add(v.songId));
+        songs.forEach((s) => {
+          if (targetIds.has(s.id) || s.songFamilyId === fam.id) {
+            targetIds.add(s.id);
+            familyTitles.add(s.title.trim().toLowerCase());
+          }
+        });
+        if (fam.name) familyTitles.add(fam.name.trim().toLowerCase());
+      }
+      return { targetIds, familyTitles, isStaleTargetId: false, isAmbiguousTargetTitle: false };
+    }
+
+    // No target ID supplied
+    if (!cleanTitle) {
+      return { targetIds, familyTitles, isStaleTargetId: false, isAmbiguousTargetTitle: false };
+    }
+
+    const titleMatches = songs.filter((s) => s.title.trim().toLowerCase() === cleanTitle);
+    if (titleMatches.length > 1) {
+      return { targetIds, familyTitles, isStaleTargetId: false, isAmbiguousTargetTitle: true };
+    }
+
+    if (titleMatches.length === 1) {
+      return this.getFamilySongIdSet(titleMatches[0].title, songs, families, titleMatches[0].id);
+    }
+
+    // Unmatched title string (e.g. legacy/unlinked or family name)
+    const famByName = families.find((f) => f.name.trim().toLowerCase() === cleanTitle);
+    if (famByName) {
+      (famByName.versionIds || []).forEach((id) => targetIds.add(id));
+      (famByName.versions || []).forEach((v) => targetIds.add(v.songId));
+      songs.forEach((s) => {
+        if (targetIds.has(s.id) || s.songFamilyId === famByName.id) {
+          targetIds.add(s.id);
+          familyTitles.add(s.title.trim().toLowerCase());
+        }
+      });
+    }
+    familyTitles.add(cleanTitle);
+    return { targetIds, familyTitles, isStaleTargetId: false, isAmbiguousTargetTitle: false };
+  }
+
+  private static countSlotMatchesInSchedule(
+    sch: Schedule,
+    targetCleanTitle: string,
+    targetIds: Set<string>,
+    familyTitles: Set<string>,
+    isStaleTargetId: boolean,
+    isAmbiguousTargetTitle: boolean,
+    songs: Song[]
+  ): number {
+    if (isAmbiguousTargetTitle) return 0;
+
+    const countSection = (titles: string[] = [], ids: string[] = []): number => {
+      let hits = 0;
+      const len = Math.max(titles.length, ids.length);
+      for (let idx = 0; idx < len; idx++) {
+        const slotTitle = (titles[idx] || '').trim();
+        const slotId = (ids[idx] || '').trim();
+        if (!slotTitle && !slotId) continue;
+
+        if (slotId) {
+          if (targetIds.has(slotId)) {
+            hits++;
+          }
+          // Slot has explicit ID: never fall back to title if it doesn't match targetIds
+          continue;
+        }
+
+        // Slot has no ID: if target itself is a stale ID, un-ID'd slots cannot match it
+        if (isStaleTargetId) continue;
+
+        const resolved = resolveSlotSong(slotTitle, undefined, songs);
+        if (resolved.isAmbiguous) continue;
+        if (resolved.song) {
+          if (targetIds.has(resolved.song.id)) {
+            hits++;
+          }
+          continue;
+        }
+        // Both slot and target are unmatched in catalog -> compare normalized familyTitles
+        if (targetIds.size === 0 && familyTitles.has(slotTitle.toLowerCase())) {
+          hits++;
+        } else if (targetIds.size === 0 && targetCleanTitle && slotTitle.toLowerCase() === targetCleanTitle) {
+          hits++;
+        }
+      }
+      return hits;
+    };
+
+    return (
+      countSection(sch.praiseSongs || [], sch.praiseSongIds || []) +
+      countSection(sch.worshipSongs || [], sch.worshipSongIds || [])
+    );
   }
 
   /**
@@ -746,34 +1134,37 @@ export class SongService {
     schedules: Schedule[],
     targetMonthStr?: string,
     allSongs?: Song[],
-    allFamilies?: SongFamily[]
+    allFamilies?: SongFamily[],
+    songId?: string
   ): number {
     const cleanTitle = songTitle.trim().toLowerCase();
-    if (!cleanTitle || !schedules || schedules.length === 0) return 0;
+    const cleanId = (songId || '').trim();
+    if ((!cleanTitle && !cleanId) || !schedules || schedules.length === 0) return 0;
 
-    const familyTitles = new Set(this.getFamilySongTitles(songTitle, allSongs, allFamilies));
+    const songs = allSongs ?? this.getSongsSync();
+    const { targetIds, familyTitles, isStaleTargetId, isAmbiguousTargetTitle } = this.getFamilySongIdSet(
+      songTitle,
+      songs,
+      allFamilies,
+      songId
+    );
     const monthStr = targetMonthStr || getManilaTodayString().substring(0, 7);
 
     let count = 0;
     for (const sch of schedules) {
-      if (!sch.serviceDate) continue;
+      if (isNoServiceSchedule(sch) || !sch.serviceDate) continue;
       const schYM = sch.serviceDate.substring(0, 7);
       if (schYM !== monthStr) continue;
 
-      if (sch.praiseSongs) {
-        for (const p of sch.praiseSongs) {
-          if (familyTitles.has(p.trim().toLowerCase())) {
-            count++;
-          }
-        }
-      }
-      if (sch.worshipSongs) {
-        for (const w of sch.worshipSongs) {
-          if (familyTitles.has(w.trim().toLowerCase())) {
-            count++;
-          }
-        }
-      }
+      count += this.countSlotMatchesInSchedule(
+        sch,
+        cleanTitle,
+        targetIds,
+        familyTitles,
+        isStaleTargetId,
+        isAmbiguousTargetTitle,
+        songs
+      );
     }
 
     return count;
@@ -793,19 +1184,27 @@ export class SongService {
     excludeScheduleId?: string,
     candidateServiceType: string = 'Sunday Service',
     allSongs?: Song[],
-    allFamilies?: SongFamily[]
+    allFamilies?: SongFamily[],
+    songId?: string
   ): MonthlyUsageCheckResult {
     const cleanTitle = songTitle.trim().toLowerCase();
-    if (!cleanTitle || !targetDateStr) {
+    const cleanId = (songId || '').trim();
+    if ((!cleanTitle && !cleanId) || !targetDateStr) {
       return { songTitle, timesUsedThisMonth: 0, serviceTypes: [], datesUsed: [], affectedSchedules: [] };
     }
 
-    const familyTitles = new Set(this.getFamilySongTitles(songTitle, allSongs, allFamilies));
+    const songs = allSongs ?? this.getSongsSync();
+    const { targetIds, familyTitles, isStaleTargetId, isAmbiguousTargetTitle } = this.getFamilySongIdSet(
+      songTitle,
+      songs,
+      allFamilies,
+      songId
+    );
     const targetYearMonth = targetDateStr.substring(0, 7);
     const isCandidateRegular = !isSpecialEvent(candidateServiceType);
 
-    // Filter out the schedule being edited if excludeScheduleId is provided
-    const otherSchedules = schedules.filter((s) => s.id !== excludeScheduleId);
+    // Filter out the schedule being edited if excludeScheduleId is provided, and skip No Service records
+    const otherSchedules = schedules.filter((s) => s.id !== excludeScheduleId && !isNoServiceSchedule(s));
 
     // Find all saved schedules in target month containing this song (ignoring special events if candidate is regular)
     let candidateSchedules = otherSchedules.filter((sch) => {
@@ -848,18 +1247,24 @@ export class SongService {
       }
     }
 
-    const containingSchedules = candidateSchedules.filter((sch) => {
-      const hasPraise = (sch.praiseSongs || []).some((s) => familyTitles.has(s.trim().toLowerCase()));
-      const hasWorship = (sch.worshipSongs || []).some((s) => familyTitles.has(s.trim().toLowerCase()));
-      return hasPraise || hasWorship;
-    });
+    let totalUsesInOtherSchedules = 0;
+    const containingSchedules: Schedule[] = [];
 
-    // Calculate total times used in existing schedules this month
-    const totalUsesInOtherSchedules = containingSchedules.reduce((acc, sch) => {
-      const praiseCount = (sch.praiseSongs || []).filter((s) => familyTitles.has(s.trim().toLowerCase())).length;
-      const worshipCount = (sch.worshipSongs || []).filter((s) => familyTitles.has(s.trim().toLowerCase())).length;
-      return acc + praiseCount + worshipCount;
-    }, 0);
+    for (const sch of candidateSchedules) {
+      const matches = this.countSlotMatchesInSchedule(
+        sch,
+        cleanTitle,
+        targetIds,
+        familyTitles,
+        isStaleTargetId,
+        isAmbiguousTargetTitle,
+        songs
+      );
+      if (matches > 0) {
+        containingSchedules.push(sch);
+        totalUsesInOtherSchedules += matches;
+      }
+    }
 
     if (containingSchedules.length === 0) {
       return { songTitle, timesUsedThisMonth: 0, serviceTypes: [], datesUsed: [], affectedSchedules: [] };
@@ -910,7 +1315,13 @@ export class SongService {
 
         type UsageEntry = { date: string; serviceType: string; scheduleId?: string };
 
-        // 1. Build inverted index by song ID and normalized title in a single schedule walk O(S)
+        const titleCounts = new Map<string, number>();
+        for (const s of songs) {
+          const clean = s.title.trim().toLowerCase();
+          if (clean) titleCounts.set(clean, (titleCounts.get(clean) || 0) + 1);
+        }
+
+        // 1. Build inverted index by song ID and (only for un-ID'd slots) normalized title in O(S)
         const usageBySongId = new Map<string, UsageEntry[]>();
         const usageByCleanTitle = new Map<string, UsageEntry[]>();
 
@@ -925,6 +1336,7 @@ export class SongService {
         };
 
         for (const sch of schedules) {
+          if (isNoServiceSchedule(sch)) continue;
           const entry: UsageEntry = {
             date: sch.serviceDate || '',
             serviceType: sch.serviceType || 'Sunday Service',
@@ -933,35 +1345,27 @@ export class SongService {
 
           const seenInThisSchedule = new Set<string>();
 
-          // Praise songs
-          (sch.praiseSongIds || []).forEach((id) => {
-            if (id && !seenInThisSchedule.has(`id:${id}`)) {
-              seenInThisSchedule.add(`id:${id}`);
-              recordUsage(usageBySongId, id, entry);
+          const indexSection = (titles: string[] = [], ids: string[] = []) => {
+            const len = Math.max(titles.length, ids.length);
+            for (let idx = 0; idx < len; idx++) {
+              const slotId = (ids[idx] || '').trim();
+              const slotTitle = (titles[idx] || '').trim().toLowerCase();
+              if (slotId) {
+                if (!seenInThisSchedule.has(`id:${slotId}`)) {
+                  seenInThisSchedule.add(`id:${slotId}`);
+                  recordUsage(usageBySongId, slotId, entry);
+                }
+                continue;
+              }
+              if (slotTitle && !seenInThisSchedule.has(`title:${slotTitle}`)) {
+                seenInThisSchedule.add(`title:${slotTitle}`);
+                recordUsage(usageByCleanTitle, slotTitle, entry);
+              }
             }
-          });
-          (sch.praiseSongs || []).forEach((title) => {
-            const clean = title?.trim().toLowerCase();
-            if (clean && !seenInThisSchedule.has(`title:${clean}`)) {
-              seenInThisSchedule.add(`title:${clean}`);
-              recordUsage(usageByCleanTitle, clean, entry);
-            }
-          });
+          };
 
-          // Worship songs
-          (sch.worshipSongIds || []).forEach((id) => {
-            if (id && !seenInThisSchedule.has(`id:${id}`)) {
-              seenInThisSchedule.add(`id:${id}`);
-              recordUsage(usageBySongId, id, entry);
-            }
-          });
-          (sch.worshipSongs || []).forEach((title) => {
-            const clean = title?.trim().toLowerCase();
-            if (clean && !seenInThisSchedule.has(`title:${clean}`)) {
-              seenInThisSchedule.add(`title:${clean}`);
-              recordUsage(usageByCleanTitle, clean, entry);
-            }
-          });
+          indexSection(sch.praiseSongs || [], sch.praiseSongIds || []);
+          indexSection(sch.worshipSongs || [], sch.worshipSongIds || []);
         }
 
         // 2. Update each song in a single walk O(N)
@@ -972,7 +1376,8 @@ export class SongService {
           const songId = song.id;
 
           const idMatches = usageBySongId.get(songId) || [];
-          const titleMatches = usageByCleanTitle.get(cleanTitle) || [];
+          const titleMatches =
+            titleCounts.get(cleanTitle) === 1 ? (usageByCleanTitle.get(cleanTitle) || []) : [];
 
           // Merge entries deduplicated by scheduleId/date/serviceType
           const mergedSet = new Set<string>();

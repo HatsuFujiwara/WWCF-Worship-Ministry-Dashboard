@@ -14,8 +14,10 @@ import {
   WeekGroup
 } from '../utils/analyticsScopeUtils';
 import { calculateSongAnalytics, getScheduleSongLeaders } from '../utils/songAnalyticsUtils';
+import { isPopulatedSchedule } from '../utils/scheduleUtils';
 import { getManilaTodayString, formatDateDisplayManila } from '../utils/dateUtils';
 import { getTagColorStyle } from '../utils/tagUtils';
+import { resolveSlotSong } from '../utils/songResolveUtils';
 import {
   BarChart3,
   Calendar,
@@ -77,6 +79,7 @@ const TriStateCheckbox: React.FC<{
       id={id}
       ref={ref}
       checked={checked}
+      aria-checked={indeterminate ? 'mixed' : checked}
       onChange={onChange}
       aria-label={ariaLabel}
       className={`rounded text-blue-600 focus:ring-blue-500 cursor-pointer ${className}`}
@@ -106,7 +109,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
   const [isServicesPanelExpanded, setIsServicesPanelExpanded] = useState(false);
   const [sectionsMode, setSectionsMode] = useState<'standard' | 'custom'>('standard');
   const [previewTab, setPreviewTab] = useState<
-    'all' | 'summary' | 'most_played' | 'song_leaders' | 'same_month' | 'lineup_register' | 'team_personnel' | 'unrotated'
+    'all' | 'summary' | 'most_played' | 'song_leaders' | 'same_month' | 'lineup_register' | 'team_personnel' | 'unrotated' | 'rotation_heatmap'
   >('all');
 
   // Expanded tree states for Date Hierarchy Tree
@@ -199,16 +202,23 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
   const unrotatedSongs = useMemo(() => {
     const usedCanonicalKeys = new Set<string>();
     pastSchedules.forEach((s) => {
-      [...(s.praiseSongs || []), ...(s.worshipSongs || [])].forEach((title) => {
-        if (!title || !title.trim()) return;
-        const identity = getCanonicalSongIdentity(title, songs, songFamilies);
+      (s.praiseSongs || []).forEach((title, idx) => {
+        const slotId = s.praiseSongIds?.[idx];
+        if (!title?.trim() && !slotId?.trim()) return;
+        const identity = getCanonicalSongIdentity(title || '', songs, songFamilies, slotId);
+        usedCanonicalKeys.add(identity.canonicalKey);
+      });
+      (s.worshipSongs || []).forEach((title, idx) => {
+        const slotId = s.worshipSongIds?.[idx];
+        if (!title?.trim() && !slotId?.trim()) return;
+        const identity = getCanonicalSongIdentity(title || '', songs, songFamilies, slotId);
         usedCanonicalKeys.add(identity.canonicalKey);
       });
     });
 
     return (songs || [])
       .filter((s) => {
-        const identity = getCanonicalSongIdentity(s.title, songs, songFamilies);
+        const identity = getCanonicalSongIdentity(s.title, songs, songFamilies, s.id);
         return !usedCanonicalKeys.has(identity.canonicalKey);
       })
       .sort((a, b) => {
@@ -218,6 +228,92 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
         return a.title.localeCompare(b.title);
       });
   }, [pastSchedules, songs, songFamilies]);
+
+  // Rotation Heatmap and Timeline data computed strictly from pastSchedules historical dates
+  const rotationTimelineData = useMemo(() => {
+    const sortedPast = [...pastSchedules].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+    
+    const songMap = new Map<string, {
+      canonicalId: string;
+      title: string;
+      artist: string;
+      totalPlays: number;
+      dates: Set<string>;
+      dateDetails: Map<string, { key?: string; isPraise: boolean; leaderName?: string; serviceType: string }>;
+    }>();
+
+    sortedPast.forEach((s) => {
+      const leaderNames = getScheduleSongLeaders(s, members).allScheduleLeaders.map((m) => m.name).join(', ') || undefined;
+
+      const recordSlot = (title: string, slotId: string | undefined, keyUsed: string | undefined, isPraise: boolean) => {
+        const cleanTitle = (title || '').trim();
+        const cleanSlotId = (slotId || '').trim();
+        if ((!cleanTitle && !cleanSlotId) || cleanTitle.toLowerCase() === 'n/a') return;
+
+        const resolved = resolveSlotSong(cleanTitle, cleanSlotId || undefined, songs);
+        const realSong = resolved.song;
+
+        let songKey: string;
+        let displayTitle: string;
+        let displayArtist: string;
+        if (realSong) {
+          songKey = realSong.id;
+          displayTitle = realSong.title;
+          displayArtist = realSong.artist;
+        } else if (resolved.isStaleId) {
+          songKey = `stale_${cleanSlotId}`;
+          displayTitle = cleanTitle || 'Unavailable Song';
+          displayArtist = 'Removed Song';
+        } else if (resolved.isAmbiguous) {
+          songKey = `ambiguous_${cleanTitle.toLowerCase()}`;
+          displayTitle = cleanTitle;
+          displayArtist = 'Multiple Catalog Matches';
+        } else {
+          songKey = `unmatched_${cleanTitle.toLowerCase()}`;
+          displayTitle = cleanTitle;
+          displayArtist = 'Catalog Song';
+        }
+
+        let entry = songMap.get(songKey);
+        if (!entry) {
+          entry = {
+            canonicalId: songKey,
+            title: displayTitle,
+            artist: displayArtist,
+            totalPlays: 0,
+            dates: new Set(),
+            dateDetails: new Map()
+          };
+          songMap.set(songKey, entry);
+        }
+
+        entry.totalPlays += 1;
+        entry.dates.add(s.serviceDate);
+        entry.dateDetails.set(s.serviceDate, {
+          key: keyUsed || realSong?.key,
+          isPraise,
+          leaderName: leaderNames,
+          serviceType: s.serviceType
+        });
+      };
+
+      (s.praiseSongs || []).forEach((title, idx) => {
+        recordSlot(title, s.praiseSongIds?.[idx], s.praiseSongKeys?.[idx] || undefined, true);
+      });
+      (s.worshipSongs || []).forEach((title, idx) => {
+        recordSlot(title, s.worshipSongIds?.[idx], s.worshipSongKeys?.[idx] || undefined, false);
+      });
+    });
+
+    const songRows = Array.from(songMap.values()).sort(
+      (a, b) => b.totalPlays - a.totalPlays || a.title.localeCompare(b.title)
+    );
+
+    return {
+      sortedSchedules: sortedPast,
+      songRows
+    };
+  }, [pastSchedules, songs, members]);
 
   // Filtered ranking list
   const filteredRankings = useMemo(() => {
@@ -410,16 +506,22 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
   };
 
   const toggleWeekSelection = (weekGroup: WeekGroup, monthGroup: MonthGroup, yearGroup: YearGroup) => {
-    const allWeekSchedsSelected = weekGroup.scheduleIds.every((id) => scope.selectedScheduleIds.includes(id));
+    // Find all schedule IDs in the entire dataset that fall in this canonical Monday-to-Sunday week interval
+    const allSchedulesInWeek = schedules.filter(
+      (s) => isPopulatedSchedule(s) && s.serviceDate && s.serviceDate >= weekGroup.startDate && s.serviceDate <= weekGroup.endDate
+    );
+    const targetSchedIds = allSchedulesInWeek.length > 0 ? allSchedulesInWeek.map((s) => s.id) : weekGroup.scheduleIds;
+
+    const allWeekSchedsSelected = targetSchedIds.every((id) => scope.selectedScheduleIds.includes(id));
     let nextScheduleIds = [...scope.selectedScheduleIds];
     let nextWeeks = [...scope.selectedWeeks];
 
     if (allWeekSchedsSelected) {
-      const weekSchedSet = new Set(weekGroup.scheduleIds);
+      const weekSchedSet = new Set(targetSchedIds);
       nextScheduleIds = nextScheduleIds.filter((id) => !weekSchedSet.has(id));
       nextWeeks = nextWeeks.filter((w) => w !== weekGroup.weekKey);
     } else {
-      nextScheduleIds = Array.from(new Set([...nextScheduleIds, ...weekGroup.scheduleIds]));
+      nextScheduleIds = Array.from(new Set([...nextScheduleIds, ...targetSchedIds]));
       if (!nextWeeks.includes(weekGroup.weekKey)) {
         nextWeeks.push(weekGroup.weekKey);
       }
@@ -629,7 +731,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               Report Builder
             </span>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1b75bc]" />
               {isDateRangeInvalid
                 ? 'Invalid date range'
                 : filteredSchedules.length === 0
@@ -662,7 +764,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
         aria-labelledby="step-1-heading"
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden"
       >
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-850/40">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-black/40">
           <div className="flex items-center gap-3">
             <span className="w-7 h-7 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
               1
@@ -709,17 +811,17 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setScope({ ...scope, mode: 'follow_saved' })}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                   scope.mode === 'follow_saved'
-                    ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 shadow-2xs ring-1 ring-blue-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-blue-50/70 dark:bg-blue-950/40 text-[#1b75bc] dark:text-blue-200 shadow-xs ring-2 ring-[#1b75bc]/25'
+                    : 'border-slate-200 dark:border-white/10 bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-white/5 text-slate-800 dark:text-slate-200'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold">Follow Saved Lineups filters</span>
-                  {scope.mode === 'follow_saved' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                <div className="flex items-center justify-between w-full mb-1.5">
+                  <span className="text-sm font-bold">Follow Saved Lineups</span>
+                  {scope.mode === 'follow_saved' && <Check className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />}
                 </div>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Default: reads active search and filters from Saved Lineups without modifying them
                 </span>
               </button>
@@ -728,17 +830,17 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setScope({ ...scope, mode: 'date_range' })}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                   scope.mode === 'date_range'
-                    ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 shadow-2xs ring-1 ring-blue-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-blue-50/70 dark:bg-blue-950/40 text-[#1b75bc] dark:text-blue-200 shadow-xs ring-2 ring-[#1b75bc]/25'
+                    : 'border-slate-200 dark:border-white/10 bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-white/5 text-slate-800 dark:text-slate-200'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold">Choose a date range</span>
-                  {scope.mode === 'date_range' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                <div className="flex items-center justify-between w-full mb-1.5">
+                  <span className="text-sm font-bold">Choose Date Range</span>
+                  {scope.mode === 'date_range' && <Check className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />}
                 </div>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Select start and end dates or choose presets like This Month or This Year
                 </span>
               </button>
@@ -750,19 +852,19 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                   setScope({ ...scope, mode: 'specific_dates' });
                   setIsDateTreeExpanded(true);
                 }}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                   scope.mode === 'specific_dates' || scope.mode === 'custom'
-                    ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 shadow-2xs ring-1 ring-blue-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-blue-50/70 dark:bg-blue-950/40 text-[#1b75bc] dark:text-blue-200 shadow-xs ring-2 ring-[#1b75bc]/25'
+                    : 'border-slate-200 dark:border-white/10 bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-white/5 text-slate-800 dark:text-slate-200'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold">Choose specific dates</span>
+                <div className="flex items-center justify-between w-full mb-1.5">
+                  <span className="text-sm font-bold">Specific Dates</span>
                   {(scope.mode === 'specific_dates' || scope.mode === 'custom') && (
-                    <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <Check className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
                   )}
                 </div>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Check individual years, months, or Monday–Sunday calendar weeks
                 </span>
               </button>
@@ -771,17 +873,17 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={handleSelectAllHistory}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                   scope.mode === 'all'
-                    ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 shadow-2xs ring-1 ring-blue-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-blue-50/70 dark:bg-blue-950/40 text-[#1b75bc] dark:text-blue-200 shadow-xs ring-2 ring-[#1b75bc]/25'
+                    : 'border-slate-200 dark:border-white/10 bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-white/5 text-slate-800 dark:text-slate-200'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold">All history</span>
-                  {scope.mode === 'all' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                <div className="flex items-center justify-between w-full mb-1.5">
+                  <span className="text-sm font-bold">All History</span>
+                  {scope.mode === 'all' && <Check className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />}
                 </div>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Explicitly selects all eligible saved lineup records across all years
                 </span>
               </button>
@@ -881,13 +983,13 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             <button
               type="button"
               onClick={() => setIsDateTreeExpanded(!isDateTreeExpanded)}
-              className="w-full p-3 bg-slate-50/70 dark:bg-slate-850/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between text-left transition-colors cursor-pointer"
+              className="w-full p-3 bg-slate-50/70 dark:bg-black/50 hover:bg-slate-100 dark:hover:bg-slate-800/60 flex items-center justify-between text-left transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                 <Calendar className="w-3.5 h-3.5 text-blue-600" />
                 <span>Choose specific months or weeks (Hierarchical Tree)</span>
                 {scope.selectedScheduleIds.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
                     {scope.selectedScheduleIds.length} checked
                   </span>
                 )}
@@ -899,11 +1001,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {isDateTreeExpanded && (
               <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Selecting a year or month selects all lineups beneath it. Calendar weeks follow complete Monday–Sunday intervals without cross-month splitting.
                 </p>
 
-                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-750 p-2 space-y-2 text-xs">
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 p-2 space-y-2 text-xs">
                   {dateHierarchy.length === 0 ? (
                     <p className="text-slate-400 py-3 text-center">No saved lineup dates found.</p>
                   ) : (
@@ -918,7 +1020,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                       return (
                         <div
                           key={yearGroup.year}
-                          className="border border-slate-100 dark:border-slate-800 rounded-lg p-2 bg-slate-50/50 dark:bg-slate-850/30"
+                          className="border border-slate-100 dark:border-slate-800 rounded-lg p-2 bg-slate-50/50 dark:bg-black/30"
                         >
                           {/* Year Row */}
                           <div className="flex items-center justify-between">
@@ -1068,7 +1170,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             <button
               type="button"
               onClick={() => setIsCrossYearMonthsExpanded(!isCrossYearMonthsExpanded)}
-              className="w-full p-2.5 bg-slate-50/70 dark:bg-slate-850/50 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between text-left transition-colors cursor-pointer"
+              className="w-full p-2.5 bg-slate-50/70 dark:bg-black/50 hover:bg-slate-100 dark:hover:bg-slate-800/60 flex items-center justify-between text-left transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
                 <CalendarRange className="w-3.5 h-3.5 text-slate-500" />
@@ -1106,7 +1208,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
           {/* Collapsible Canonical Services Panel */}
           {isServicesPanelExpanded && (
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850/40 space-y-2.5">
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-black/40 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <Music className="w-3.5 h-3.5 text-blue-600" />
@@ -1115,7 +1217,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 <button
                   type="button"
                   onClick={handleSelectAllServices}
-                  className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                 >
                   Select All Services
                 </button>
@@ -1127,10 +1229,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                   return (
                     <label
                       key={st}
-                      className={`flex items-center gap-2 cursor-pointer p-2 rounded-lg border transition-colors ${
+                      className={`flex items-center gap-2 cursor-pointer p-2.5 rounded-lg border transition-colors ${
                         isChecked
-                          ? 'bg-blue-50/60 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900/60 text-blue-900 dark:text-blue-200 font-medium'
-                          : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 text-slate-600 dark:text-slate-400'
+                          ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-200 font-semibold'
+                          : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       <input
@@ -1164,7 +1266,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
         aria-labelledby="step-2-heading"
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden"
       >
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-850/40">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-black/40">
           <div className="flex items-center gap-3">
             <span className="w-7 h-7 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
               2
@@ -1191,8 +1293,8 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               onClick={handleSelectStandardSections}
               className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                 sectionsMode === 'standard' && activeSectionsCount === 7
-                  ? 'bg-blue-600 text-white shadow-2xs'
-                  : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                  ? 'bg-[#1b75bc] text-white shadow-xs'
+                  : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
               }`}
             >
               Standard (All 7)
@@ -1202,8 +1304,8 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               onClick={() => setSectionsMode('custom')}
               className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                 sectionsMode === 'custom' || activeSectionsCount < 7
-                  ? 'bg-blue-600 text-white shadow-2xs'
-                  : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                  ? 'bg-[#1b75bc] text-white shadow-xs'
+                  : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
               }`}
             >
               Customize
@@ -1213,7 +1315,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
         <div className="p-4 sm:p-6 space-y-4">
           {sectionsMode === 'standard' ? (
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -1221,14 +1323,14 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                     Standard Ministry Report Selected (All 7 Sections)
                   </span>
                 </div>
-                <p className="text-slate-500 dark:text-slate-400 text-[11px] pl-6">
+                <p className="text-slate-500 dark:text-slate-400 text-xs pl-6">
                   Includes Summary KPI Metrics, Most-Played Songs, Song Leader Favorites, Same-Month Repeats, Lineup Register, Team Personnel, and Unrotated Suggestions.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSectionsMode('custom')}
-                className="py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 font-semibold text-xs cursor-pointer shadow-2xs shrink-0 self-start sm:self-auto"
+                className="py-1.5 px-3 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-black text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/10 font-semibold text-xs cursor-pointer shadow-xs shrink-0 self-start sm:self-auto"
               >
                 Customize Sections
               </button>
@@ -1261,10 +1363,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
             {/* Section 1 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.summaryMetrics
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1274,10 +1376,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   1. Summary KPI Metrics
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Lineup count, total placements, unique songs, repeats, upcoming setlists
                 </span>
               </div>
@@ -1285,10 +1387,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 2 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.mostPlayedRanking
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1298,10 +1400,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   2. Most-Played Songs
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Frequency ranking, song family breakdowns, last sung date & leaders
                 </span>
               </div>
@@ -1309,10 +1411,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 3 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.songLeaderUsage
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1322,10 +1424,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   3. Song Leader Favorites
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Personal leader favorite songs (using standard ≥2 plays threshold)
                 </span>
               </div>
@@ -1333,10 +1435,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 4 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.sameMonthRepeats
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1346,10 +1448,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   4. Same-Month Repeats
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Flags songs sung multiple times within the exact same calendar month and year
                 </span>
               </div>
@@ -1357,10 +1459,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 5 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.lineupRegister
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1370,10 +1472,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   5. Lineup Register
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Chronological log of service setlists with Played vs Upcoming status tags
                 </span>
               </div>
@@ -1381,10 +1483,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 6 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 sections.assignedMembers
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1394,10 +1496,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   6. Assigned Team Roles
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Roster members who served and their service frequency by role
                 </span>
               </div>
@@ -1405,10 +1507,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* Section 7 */}
             <label
-              className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-colors md:col-span-2 lg:col-span-3 ${
+              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all md:col-span-2 lg:col-span-3 ${
                 sections.lessUsedSongs
-                  ? 'bg-blue-50/50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60'
-                  : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-750 opacity-70'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-100 ring-1 ring-[#1b75bc]/20'
+                  : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-white/20'
               }`}
             >
               <input
@@ -1418,10 +1520,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
               />
               <div>
-                <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
                   7. Unrotated Songs (Rotation Suggestions)
                 </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight block mt-0.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400 leading-normal block mt-1">
                   Catalog songs never sung in this period, useful for planning fresh upcoming lineups
                 </span>
               </div>
@@ -1497,10 +1599,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             <button
               type="button"
               onClick={() => setPreviewTab('all')}
-              className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+              className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                 previewTab === 'all'
-                  ? 'bg-blue-600 text-white shadow-2xs'
-                  : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                  ? 'bg-[#1b75bc] text-white shadow-xs'
+                  : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
               }`}
             >
               All Sections
@@ -1509,10 +1611,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('summary')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'summary'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 1. Summary
@@ -1522,10 +1624,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('most_played')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'most_played'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 2. Most-Played
@@ -1535,10 +1637,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('song_leaders')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'song_leaders'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 3. Song Leaders
@@ -1548,10 +1650,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('same_month')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'same_month'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 4. Repeats
@@ -1561,10 +1663,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('lineup_register')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'lineup_register'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 5. Lineup Register
@@ -1574,10 +1676,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('team_personnel')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'team_personnel'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 6. Team Roles
@@ -1587,15 +1689,26 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab('unrotated')}
-                className={`py-1.5 px-3 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
                   previewTab === 'unrotated'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                    ? 'bg-[#1b75bc] text-white shadow-xs'
+                    : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
                 7. Unrotated Songs
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setPreviewTab('rotation_heatmap')}
+              className={`py-2 px-3.5 rounded-xl font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                previewTab === 'rotation_heatmap'
+                  ? 'bg-[#1b75bc] text-white shadow-xs'
+                  : 'bg-white dark:bg-black border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
+              }`}
+            >
+              8. Rotation Heatmap & Timeline
+            </button>
           </div>
         )}
 
@@ -2193,20 +2306,20 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
             {/* SECTION 7: Unrotated Song Rotation Candidates */}
             {sections.lessUsedSongs && (previewTab === 'all' || previewTab === 'unrotated') && (
-              <div className="space-y-3 pt-3 border-t border-slate-200">
+              <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-white/10">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-purple-600" />
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                     7. Catalog Songs Not Sung in Selected Period (Rotation Suggestions)
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Existing songs in your church database available for rotation into future lineups
                   </p>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 overflow-x-auto max-h-60">
+                <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-x-auto max-h-60">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider sticky top-0">
+                    <thead className="bg-slate-50 dark:bg-black/60 border-b border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider sticky top-0">
                       <tr>
                         <th className="py-2 px-3">Title</th>
                         <th className="py-2 px-3">Artist</th>
@@ -2214,11 +2327,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                         <th className="py-2 px-3">Last Recorded Use</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                       {unrotatedSongs.slice(0, 20).map((song) => (
-                        <tr key={song.id} className="hover:bg-slate-50/60">
-                          <td className="py-1.5 px-3 font-semibold text-slate-800">{song.title}</td>
-                          <td className="py-1.5 px-3 text-slate-600">{song.artist}</td>
+                        <tr key={song.id} className="hover:bg-slate-50/60 dark:hover:bg-white/5">
+                          <td className="py-1.5 px-3 font-semibold text-slate-800 dark:text-slate-100">{song.title}</td>
+                          <td className="py-1.5 px-3 text-slate-600 dark:text-slate-400">{song.artist}</td>
                           <td className="py-1.5 px-3 text-center capitalize font-medium text-slate-500">
                             {song.category}
                           </td>
@@ -2230,6 +2343,127 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* SECTION 8: Rotation Heatmap & Service Timeline */}
+            {(previewTab === 'all' || previewTab === 'rotation_heatmap') && (
+              <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-white/10">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                      <CalendarRange className="w-4 h-4 text-[#1b75bc]" />
+                      8. Song Rotation Heatmap & Service Timeline
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Service-by-service matrix calculated strictly from past recorded lineups without synthetic interpolation.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-blue-500/20 border border-blue-500/40 inline-block" />
+                      Praise
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-purple-500/20 border border-purple-500/40 inline-block" />
+                      Worship
+                    </span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      {rotationTimelineData.songRows.length} Songs Across {rotationTimelineData.sortedSchedules.length} Services
+                    </span>
+                  </div>
+                </div>
+
+                {rotationTimelineData.sortedSchedules.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-500">
+                    No past service schedules found in this selected date range. Choose a period with completed lineups to view rotation history.
+                  </div>
+                ) : rotationTimelineData.songRows.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-500">
+                    No songs were recorded in the selected past schedules.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-x-auto max-h-96 shadow-2xs">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 dark:bg-black/80 border-b border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider sticky top-0 z-10 backdrop-blur-xs">
+                        <tr>
+                          <th className="py-2.5 px-3 min-w-[200px] sticky left-0 bg-slate-50 dark:bg-black/90 z-20 border-r border-slate-200 dark:border-white/10">
+                            Song & Artist
+                          </th>
+                          <th className="py-2.5 px-2 text-center w-14 border-r border-slate-200 dark:border-white/10">
+                            Plays
+                          </th>
+                          {rotationTimelineData.sortedSchedules.map((s) => (
+                            <th
+                              key={s.id}
+                              className="py-2 px-2 text-center min-w-[85px] border-r border-slate-200/60 dark:border-white/5 whitespace-nowrap"
+                              title={`${s.serviceType} on ${formatDateDisplayManila(s.serviceDate)}`}
+                            >
+                              <div className="font-mono text-[10px] text-slate-700 dark:text-slate-200">
+                                {s.serviceDate.slice(5)}
+                              </div>
+                              <div className="text-[9px] text-slate-400 font-normal truncate max-w-[80px]">
+                                {s.serviceType.replace(' Service', '').replace(' Fellowship', '')}
+                              </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-xs">
+                        {rotationTimelineData.songRows.map((row) => (
+                          <tr key={row.canonicalId} className="hover:bg-slate-50/60 dark:hover:bg-white/5">
+                            <td className="py-2 px-3 sticky left-0 bg-white dark:bg-black z-10 border-r border-slate-200 dark:border-white/10">
+                              <div className="font-bold text-slate-900 dark:text-white truncate max-w-[190px]" title={row.title}>
+                                {row.title}
+                              </div>
+                              <div className="text-[10px] text-slate-500 truncate max-w-[190px]">
+                                {row.artist}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 text-center font-bold text-[#1b75bc] dark:text-[#5aa7e8] border-r border-slate-200 dark:border-white/10">
+                              {row.totalPlays}x
+                            </td>
+                            {rotationTimelineData.sortedSchedules.map((s) => {
+                              const detail = row.dateDetails.get(s.serviceDate);
+                              if (!detail) {
+                                return (
+                                  <td
+                                    key={s.id}
+                                    className="py-2 px-2 text-center text-slate-300 dark:text-slate-700 border-r border-slate-100 dark:border-white/5 font-mono text-[10px]"
+                                  >
+                                    ·
+                                  </td>
+                                );
+                              }
+
+                              const isPraise = detail.isPraise;
+                              return (
+                                <td
+                                  key={s.id}
+                                  className="py-1 px-1.5 text-center border-r border-slate-100 dark:border-white/5"
+                                  title={`${row.title} performed as ${isPraise ? 'Praise' : 'Worship'} (Key: ${detail.key || 'N/A'})${detail.leaderName ? ` by ${detail.leaderName}` : ''}`}
+                                >
+                                  <div
+                                    className={`py-1 px-1 rounded-md text-[10px] font-bold border transition-transform hover:scale-105 ${
+                                      isPraise
+                                        ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                                        : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                                    }`}
+                                  >
+                                    <span className="block truncate">
+                                      {detail.key ? `Key ${detail.key}` : isPraise ? 'Praise' : 'Worship'}
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>

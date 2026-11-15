@@ -159,7 +159,7 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
     >
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-850/60">
+        <div className="px-5 py-4 border-b border-slate-100 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-black/60">
           <div className="flex items-center gap-2.5">
             {view === 'load_preview' ? (
               <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center">
@@ -296,7 +296,7 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
                   : 'Multiple backup files were discovered in your Google Drive. Select which backup file you would like to inspect and load:'}
               </p>
 
-              <div className="max-h-56 overflow-y-auto space-y-2 border border-slate-200 dark:border-slate-800 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-850/40">
+              <div className="max-h-56 overflow-y-auto space-y-2 border border-slate-200 dark:border-white/10 rounded-xl p-2 bg-slate-50/50 dark:bg-black/60">
                 {candidates.map((cand) => {
                   const isSelected = selectedCandidateId === cand.id;
                   return (

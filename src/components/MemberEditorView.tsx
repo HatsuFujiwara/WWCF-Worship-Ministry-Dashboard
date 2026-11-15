@@ -922,13 +922,13 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-800/30">
-                      <th className="py-2.5 px-3 w-8" aria-label="Row selection"></th>
-                      <th className="py-2.5 px-3">Member Name</th>
-                      <th className="py-2.5 px-3">Assigned Labels</th>
+                    <tr className="border-b border-slate-100 dark:border-white/10 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider bg-slate-50/80 dark:bg-black/60">
+                      <th className="py-3 px-3 w-8" aria-label="Row selection"></th>
+                      <th className="py-3 px-4">Member Name</th>
+                      <th className="py-3 px-4">Assigned Ministry Roles</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                     {filteredMembers.map((member, idx) => {
                       const selected = isSelected(member.id);
                       const isDisciplinary = isMemberUnderDisciplinary(member);
@@ -944,25 +944,25 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                           onDoubleClick={() => handleEditClick(member)}
                           className={`transition-colors cursor-pointer ${
                             selected
-                              ? 'bg-indigo-50/30 dark:bg-indigo-950/30'
-                              : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                              ? 'bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20'
+                              : 'hover:bg-slate-50/60 dark:hover:bg-white/5'
                           }`}
                         >
-                          <td className="py-3 px-3 w-8">
+                          <td className="py-3.5 px-3 w-8">
                             <input
                               type="checkbox"
                               checked={selected}
                               onChange={(e) => toggleSelect(member.id, idx, e)}
-                              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] cursor-pointer"
                             />
                           </td>
-                          <td className="py-3 px-3 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                          <td className="py-3.5 px-4 font-bold text-sm text-slate-900 dark:text-slate-100 whitespace-nowrap">
                             <div className="flex flex-col items-start gap-1">
                               <span>{member.name}</span>
                               {isDisciplinary && (
-                                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-md bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                                  <span>🔴 Disciplinary Action</span>
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-bold rounded-md bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                  <span>Disciplinary Action</span>
                                   {member.disciplinaryAction?.endDate && (
                                     <span className="text-rose-500 dark:text-rose-400 font-medium">
                                       • Ends: {member.disciplinaryAction.endDate}
@@ -972,12 +972,12 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-3">
-                            <div className="flex flex-wrap gap-1">
+                          <td className="py-3.5 px-4">
+                            <div className="flex flex-wrap gap-1.5">
                               {sortTags(member.labels).map((lbl) => (
                                 <span
                                   key={lbl}
-                                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getTagColorStyle(lbl)}`}
+                                  className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide border ${getTagColorStyle(lbl)}`}
                                 >
                                   {lbl}
                                 </span>

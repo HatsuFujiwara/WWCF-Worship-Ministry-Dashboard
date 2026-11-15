@@ -2,10 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Member, Schedule, Song } from '../types';
+import { Member, Schedule, Song, LineupTemplate, MemberAvailability, SongFamiliarity } from '../types';
 import { StorageService, DraftSchedule } from '../services/storage';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
+import { TemplateService } from '../services/templateService';
+import { AvailabilityService, buildAvailabilityId } from '../services/availabilityService';
+import { FamiliarityService } from '../services/familiarityService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
 import { BackupValidationService } from '../services/backupValidationService';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
@@ -94,8 +97,16 @@ async function buildCurrentPayload(options: {
   const currentSchedules = options.schedules || StorageService.getSchedulesSync();
   const currentLabels = options.labels || StorageService.getLabelsSync();
   const currentSongFamilies = await SongFamilyService.getSongFamilies();
+  const currentTemplates = TemplateService.getTemplatesSync();
+  const currentAvailability = AvailabilityService.getAvailabilityListSync();
+  const currentFamiliarity = FamiliarityService.getFamiliarityListSync();
   const currentDraft =
     options.draftSchedule !== undefined ? options.draftSchedule : StorageService.getDraftScheduleSync();
+
+  if (currentLabels.length > 1000) {
+    throw new Error('Transfer payload exceeds the 1,000-label limit.');
+  }
+  const boundedLabels = currentLabels.map((l) => (typeof l === 'string' ? l.trim().slice(0, 100) : '')).filter(Boolean);
 
   return {
     app: 'WWCF Santa Cruz Worship Ministry',
@@ -106,8 +117,11 @@ async function buildCurrentPayload(options: {
       members: currentMembers,
       songs: currentSongs,
       schedules: currentSchedules,
-      labels: currentLabels,
+      labels: boundedLabels,
       songFamilies: currentSongFamilies,
+      templates: currentTemplates,
+      memberAvailability: currentAvailability,
+      songFamiliarity: currentFamiliarity,
       draft: options.includeDraft ? currentDraft : undefined
     }
   };
@@ -127,83 +141,163 @@ async function executeDataImport(incoming: any, strategy: 'merge' | 'replace'): 
 
   const validData = validation.data;
 
-  if (strategy === 'replace') {
-    if (Array.isArray(validData.members)) {
-      StorageService.saveMembers(validData.members);
-    }
-    if (Array.isArray(validData.labels)) {
-      StorageService.saveLabels(validData.labels);
-    }
-    if (Array.isArray(validData.schedules)) {
-      StorageService.saveSchedules(validData.schedules);
-    }
-    if (Array.isArray(validData.songs)) {
-      await SongService.saveSongsList(validData.songs);
-    }
-    if (Array.isArray(validData.songFamilies)) {
-      await SongFamilyService.saveSongFamilies(validData.songFamilies);
-    }
-    if (validData.draftSchedule !== undefined) {
-      StorageService.saveDraftSchedule(validData.draftSchedule);
-    }
-  } else {
-    if (Array.isArray(validData.members)) {
-      const currentMembers = StorageService.getMembersSync();
-      const memberMap = new Map<string, Member>();
-      currentMembers.forEach((m) => memberMap.set(m.id, m));
-      validData.members.forEach((m: Member) => {
-        if (!memberMap.has(m.id)) {
-          memberMap.set(m.id, m);
-        }
-      });
-      StorageService.saveMembers(Array.from(memberMap.values()));
-    }
+  // Snapshot all current collections for atomic rollback if any store write fails
+  const snapshot = {
+    members: StorageService.getMembersSync(),
+    labels: StorageService.getLabelsSync(),
+    schedules: StorageService.getSchedulesSync(),
+    songs: await SongService.getSongs(),
+    songFamilies: await SongFamilyService.getSongFamilies(),
+    templates: TemplateService.getTemplatesSync(),
+    memberAvailability: AvailabilityService.getAvailabilityListSync(),
+    songFamiliarity: FamiliarityService.getFamiliarityListSync(),
+    draft: StorageService.getDraftScheduleSync()
+  };
 
-    if (Array.isArray(validData.labels)) {
-      const currentLabels = StorageService.getLabelsSync();
-      const labelSet = new Set([...currentLabels, ...validData.labels]);
-      StorageService.saveLabels(Array.from(labelSet));
-    }
+  try {
+    if (strategy === 'replace') {
+      if (Array.isArray(validData.members)) {
+        StorageService.saveMembersChecked(validData.members);
+      }
+      if (Array.isArray(validData.labels)) {
+        StorageService.saveLabelsChecked(validData.labels);
+      }
+      if (Array.isArray(validData.schedules)) {
+        StorageService.saveSchedulesChecked(validData.schedules);
+      }
+      if (Array.isArray(validData.songs)) {
+        await SongService.saveSongsList(validData.songs);
+      }
+      if (Array.isArray(validData.songFamilies)) {
+        await SongFamilyService.saveSongFamilies(validData.songFamilies);
+      }
+      if (Array.isArray(validData.templates)) {
+        TemplateService.saveTemplatesSync(validData.templates);
+      }
+      if (Array.isArray(validData.memberAvailability)) {
+        AvailabilityService.saveAvailabilityListSync(validData.memberAvailability);
+      }
+      if (Array.isArray(validData.songFamiliarity)) {
+        FamiliarityService.saveFamiliarityListSync(validData.songFamiliarity);
+      }
+      if (validData.draftSchedule !== undefined) {
+        StorageService.saveDraftScheduleChecked(validData.draftSchedule);
+      }
+    } else {
+      if (Array.isArray(validData.members)) {
+        const currentMembers = StorageService.getMembersSync();
+        const memberMap = new Map<string, Member>();
+        currentMembers.forEach((m) => memberMap.set(m.id, m));
+        validData.members.forEach((m: Member) => {
+          if (!memberMap.has(m.id)) {
+            memberMap.set(m.id, m);
+          }
+        });
+        StorageService.saveMembersChecked(Array.from(memberMap.values()));
+      }
 
-    if (Array.isArray(validData.schedules)) {
-      const currentSchedules = StorageService.getSchedulesSync();
-      const scheduleMap = new Map<string, Schedule>();
-      currentSchedules.forEach((s) => scheduleMap.set(s.id, s));
-      validData.schedules.forEach((s: Schedule) => {
-        if (!scheduleMap.has(s.id)) {
-          scheduleMap.set(s.id, s);
-        }
-      });
-      StorageService.saveSchedules(Array.from(scheduleMap.values()));
-    }
+      if (Array.isArray(validData.labels)) {
+        const currentLabels = StorageService.getLabelsSync();
+        const labelSet = new Set([...currentLabels, ...validData.labels]);
+        StorageService.saveLabelsChecked(Array.from(labelSet));
+      }
 
-    if (Array.isArray(validData.songs)) {
-      const currentSongs = await SongService.getSongs();
-      const songMap = new Map<string, Song>();
-      currentSongs.forEach((s) => songMap.set(s.id, s));
-      validData.songs.forEach((s: Song) => {
-        if (!songMap.has(s.id)) {
-          songMap.set(s.id, s);
-        }
-      });
-      await SongService.saveSongsList(Array.from(songMap.values()));
-    }
+      if (Array.isArray(validData.schedules)) {
+        const currentSchedules = StorageService.getSchedulesSync();
+        const scheduleMap = new Map<string, Schedule>();
+        currentSchedules.forEach((s) => scheduleMap.set(s.id, s));
+        validData.schedules.forEach((s: Schedule) => {
+          if (!scheduleMap.has(s.id)) {
+            scheduleMap.set(s.id, s);
+          }
+        });
+        StorageService.saveSchedulesChecked(Array.from(scheduleMap.values()));
+      }
 
-    if (Array.isArray(validData.songFamilies)) {
-      const currentFamilies = await SongFamilyService.getSongFamilies();
-      const familyMap = new Map<string, any>();
-      currentFamilies.forEach((f) => familyMap.set(f.id, f));
-      validData.songFamilies.forEach((f: any) => {
-        if (!familyMap.has(f.id)) {
-          familyMap.set(f.id, f);
-        }
-      });
-      await SongFamilyService.saveSongFamilies(Array.from(familyMap.values()));
-    }
+      if (Array.isArray(validData.songs)) {
+        const currentSongs = await SongService.getSongs();
+        const songMap = new Map<string, Song>();
+        currentSongs.forEach((s) => songMap.set(s.id, s));
+        validData.songs.forEach((s: Song) => {
+          if (!songMap.has(s.id)) {
+            songMap.set(s.id, s);
+          }
+        });
+        await SongService.saveSongsList(Array.from(songMap.values()));
+      }
 
-    if (validData.draftSchedule !== undefined) {
-      StorageService.saveDraftSchedule(validData.draftSchedule);
+      if (Array.isArray(validData.songFamilies)) {
+        const currentFamilies = await SongFamilyService.getSongFamilies();
+        const familyMap = new Map<string, any>();
+        currentFamilies.forEach((f) => familyMap.set(f.id, f));
+        validData.songFamilies.forEach((f: any) => {
+          if (!familyMap.has(f.id)) {
+            familyMap.set(f.id, f);
+          }
+        });
+        await SongFamilyService.saveSongFamilies(Array.from(familyMap.values()));
+      }
+
+      if (Array.isArray(validData.templates)) {
+        const currentTemplates = TemplateService.getTemplatesSync();
+        const templateMap = new Map<string, LineupTemplate>();
+        currentTemplates.forEach((t) => templateMap.set(t.id, t));
+        validData.templates.forEach((t: LineupTemplate) => {
+          if (!templateMap.has(t.id)) {
+            templateMap.set(t.id, t);
+          }
+        });
+        TemplateService.saveTemplatesSync(Array.from(templateMap.values()));
+      }
+
+      if (Array.isArray(validData.memberAvailability)) {
+        const currentAvail = AvailabilityService.getAvailabilityListSync();
+        const availMap = new Map<string, MemberAvailability>();
+        currentAvail.forEach((a) => availMap.set(a.id || buildAvailabilityId(a.memberId, a.date, a.serviceType), a));
+        validData.memberAvailability.forEach((a: MemberAvailability) => {
+          const key = a.id || buildAvailabilityId(a.memberId, a.date, a.serviceType);
+          if (!availMap.has(key)) {
+            availMap.set(key, a);
+          }
+        });
+        AvailabilityService.saveAvailabilityListSync(Array.from(availMap.values()));
+      }
+
+      if (Array.isArray(validData.songFamiliarity)) {
+        const currentFam = FamiliarityService.getFamiliarityListSync();
+        const famMap = new Map<string, SongFamiliarity>();
+        currentFam.forEach((f) => famMap.set(f.id, f));
+        validData.songFamiliarity.forEach((f: SongFamiliarity) => {
+          if (!famMap.has(f.id)) {
+            famMap.set(f.id, f);
+          }
+        });
+        FamiliarityService.saveFamiliarityListSync(Array.from(famMap.values()));
+      }
+
+      if (validData.draftSchedule !== undefined) {
+        StorageService.saveDraftScheduleChecked(validData.draftSchedule);
+      }
     }
+  } catch (err) {
+    console.error('[TransferDataModal] Error during data transfer; rolling back all collections:', err);
+    // Rollback every collection from snapshot
+    try {
+      StorageService.saveMembersChecked(snapshot.members);
+      StorageService.saveLabelsChecked(snapshot.labels);
+      StorageService.saveSchedulesChecked(snapshot.schedules);
+      await SongService.saveSongsList(snapshot.songs);
+      await SongFamilyService.saveSongFamilies(snapshot.songFamilies);
+      TemplateService.saveTemplatesSync(snapshot.templates);
+      AvailabilityService.saveAvailabilityListSync(snapshot.memberAvailability);
+      FamiliarityService.saveFamiliarityListSync(snapshot.songFamiliarity);
+      if (snapshot.draft !== undefined) {
+        StorageService.saveDraftScheduleChecked(snapshot.draft);
+      }
+    } catch (rbErr) {
+      console.error('[TransferDataModal] Critical: rollback also threw an error:', rbErr);
+    }
+    throw err;
   }
 }
 
@@ -265,6 +359,7 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
     members: number;
     songs: number;
     schedules: number;
+    labels?: number;
     songFamilies: number;
     hasDraft: boolean;
   } | null>(null);
@@ -285,7 +380,7 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
     sessionId: string;
     token: string;
     direction: 'pc_to_phone' | 'phone_to_pc';
-    counts: { members: number; songs: number; schedules: number; songFamilies: number; hasDraft: boolean };
+    counts: { members: number; songs: number; schedules: number; labels?: number; songFamilies: number; hasDraft: boolean };
     payloadData?: any;
   } | null>(null);
   const [scannerErrorMessage, setScannerErrorMessage] = useState<string>('');
@@ -348,7 +443,9 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
         if (isSendPollingInFlightRef.current) return; // Single-flight protection against slow networks
         isSendPollingInFlightRef.current = true;
         try {
-          const res = await fetch(`/api/transfer/session/${sendSessionId}/status?token=${sendSessionToken}`);
+          const res = await fetch(`/api/transfer/session/${sendSessionId}/status`, {
+            headers: { 'X-Transfer-Token': sendSessionToken }
+          });
           if (res.ok) {
             const data = await res.json();
             if (data.status === 'connected' && sendState === 'waiting') {
@@ -409,7 +506,9 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
         if (isReceivePollingInFlightRef.current) return; // Single-flight protection against slow networks
         isReceivePollingInFlightRef.current = true;
         try {
-          const res = await fetch(`/api/transfer/session/${receiveSessionId}/status?token=${receiveSessionToken}`);
+          const res = await fetch(`/api/transfer/session/${receiveSessionId}/status`, {
+            headers: { 'X-Transfer-Token': receiveSessionToken }
+          });
           if (res.ok) {
             const statusData = await res.json();
             if (statusData.status === 'connected' && receiveQrState === 'waiting') {
@@ -417,7 +516,9 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
             } else if (statusData.status === 'data_ready') {
               if (receivePollingTimerRef.current) clearInterval(receivePollingTimerRef.current);
               try {
-                const fullRes = await fetch(`/api/transfer/session/${receiveSessionId}?token=${receiveSessionToken}`);
+                const fullRes = await fetch(`/api/transfer/session/${receiveSessionId}`, {
+                  headers: { 'X-Transfer-Token': receiveSessionToken }
+                });
                 if (fullRes.ok) {
                   const fullData = await fullRes.json();
                   setReceiveCounts(fullData.counts);
@@ -584,8 +685,11 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       try {
         await fetch(`/api/transfer/session/${sendSessionId}/cancel`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: sendSessionToken })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Transfer-Token': sendSessionToken
+          },
+          body: JSON.stringify({})
         });
       } catch {}
     }
@@ -657,8 +761,11 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       try {
         await fetch(`/api/transfer/session/${receiveSessionId}/cancel`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: receiveSessionToken })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Transfer-Token': receiveSessionToken
+          },
+          body: JSON.stringify({})
         });
       } catch {}
     }
@@ -676,7 +783,10 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       const prevSchedules = StorageService.getSchedulesSync();
       const prevSongs = await SongService.getSongs();
       const prevFamilies = await SongFamilyService.getSongFamilies();
-      const prevDraft = StorageService.getDraftSchedule();
+      const prevTemplates = TemplateService.getTemplatesSync();
+      const prevAvailability = AvailabilityService.getAvailabilityListSync();
+      const prevFamiliarity = FamiliarityService.getFamiliarityListSync();
+      const prevDraft = StorageService.getDraftScheduleSync();
       const importedPayload = { ...receivePayload };
 
       await executeDataImport(receivePayload, receiveStrategy);
@@ -684,12 +794,15 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       LineupHistoryService.pushAppAction({
         description: `Imported transferred data (${receiveStrategy === 'replace' ? 'Replace' : 'Merge'} mode)`,
         undo: async () => {
-          StorageService.saveMembers(prevMembers);
-          StorageService.saveLabels(prevLabels);
-          StorageService.saveSchedules(prevSchedules);
+          StorageService.saveMembersChecked(prevMembers);
+          StorageService.saveLabelsChecked(prevLabels);
+          StorageService.saveSchedulesChecked(prevSchedules);
           await SongService.saveSongsList(prevSongs);
           await SongFamilyService.saveSongFamilies(prevFamilies);
-          StorageService.saveDraftSchedule(prevDraft);
+          TemplateService.saveTemplatesSync(prevTemplates);
+          AvailabilityService.saveAvailabilityListSync(prevAvailability);
+          FamiliarityService.saveFamiliarityListSync(prevFamiliarity);
+          StorageService.saveDraftScheduleChecked(prevDraft);
           onDataTransferred();
         },
         redo: async () => {
@@ -701,8 +814,11 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       try {
         await fetch(`/api/transfer/session/${receiveSessionId}/complete`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: receiveSessionToken })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Transfer-Token': receiveSessionToken
+          },
+          body: JSON.stringify({})
         });
       } catch {}
 
@@ -725,10 +841,24 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       let sid = '';
       let tok = '';
 
-      if (rawQrText.includes('transferSessionId=')) {
-        const url = new URL(rawQrText);
-        sid = url.searchParams.get('transferSessionId') || '';
-        tok = url.searchParams.get('token') || '';
+      if (rawQrText.includes('transferSessionId=') || rawQrText.includes('sessionId=')) {
+        try {
+          const url = new URL(rawQrText);
+          if (url.hash) {
+            const hashParams = new URLSearchParams(url.hash.substring(1));
+            sid = hashParams.get('transferSessionId') || hashParams.get('sessionId') || '';
+            tok = hashParams.get('token') || '';
+          }
+          if (!sid || !tok) {
+            sid = url.searchParams.get('transferSessionId') || url.searchParams.get('sessionId') || '';
+            tok = url.searchParams.get('token') || '';
+          }
+        } catch {
+          const matchSid = rawQrText.match(/(?:transferSessionId|sessionId)=([^&#]+)/);
+          const matchTok = rawQrText.match(/token=([^&#]+)/);
+          sid = matchSid ? decodeURIComponent(matchSid[1]) : '';
+          tok = matchTok ? decodeURIComponent(matchTok[1]) : '';
+        }
       } else {
         const parsed = JSON.parse(rawQrText);
         sid = parsed.sessionId || parsed.transferSessionId || '';
@@ -753,7 +883,9 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
     setScannerErrorMessage('');
 
     try {
-      const response = await fetch(`/api/transfer/session/${sid}?token=${tok}`);
+      const response = await fetch(`/api/transfer/session/${sid}`, {
+        headers: { 'X-Transfer-Token': tok }
+      });
       const data = await response.json();
 
       if (!response.ok || !data.success) {
@@ -811,9 +943,11 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
 
       const response = await fetch(`/api/transfer/session/${scannedSessionData.sessionId}/upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Transfer-Token': scannedSessionData.token
+        },
         body: JSON.stringify({
-          token: scannedSessionData.token,
           payload: payloadObj
         })
       });
@@ -842,7 +976,10 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       const prevSchedules = StorageService.getSchedulesSync();
       const prevSongs = await SongService.getSongs();
       const prevFamilies = await SongFamilyService.getSongFamilies();
-      const prevDraft = StorageService.getDraftSchedule();
+      const prevTemplates = TemplateService.getTemplatesSync();
+      const prevAvailability = AvailabilityService.getAvailabilityListSync();
+      const prevFamiliarity = FamiliarityService.getFamiliarityListSync();
+      const prevDraft = StorageService.getDraftScheduleSync();
       const importedPayload = { ...scannedSessionData.payloadData };
 
       await executeDataImport(scannedSessionData.payloadData, scannerImportStrategy);
@@ -850,12 +987,15 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       LineupHistoryService.pushAppAction({
         description: `Imported scanned data (${scannerImportStrategy === 'replace' ? 'Replace' : 'Merge'} mode)`,
         undo: async () => {
-          StorageService.saveMembers(prevMembers);
-          StorageService.saveLabels(prevLabels);
-          StorageService.saveSchedules(prevSchedules);
+          StorageService.saveMembersChecked(prevMembers);
+          StorageService.saveLabelsChecked(prevLabels);
+          StorageService.saveSchedulesChecked(prevSchedules);
           await SongService.saveSongsList(prevSongs);
           await SongFamilyService.saveSongFamilies(prevFamilies);
-          StorageService.saveDraftSchedule(prevDraft);
+          TemplateService.saveTemplatesSync(prevTemplates);
+          AvailabilityService.saveAvailabilityListSync(prevAvailability);
+          FamiliarityService.saveFamiliarityListSync(prevFamiliarity);
+          StorageService.saveDraftScheduleChecked(prevDraft);
           onDataTransferred();
         },
         redo: async () => {
@@ -867,8 +1007,11 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
       try {
         await fetch(`/api/transfer/session/${scannedSessionData.sessionId}/complete`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: scannedSessionData.token })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Transfer-Token': scannedSessionData.token
+          },
+          body: JSON.stringify({})
         });
       } catch {}
 
@@ -1315,7 +1458,7 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
                           <div className="absolute inset-0 p-5 bg-black/90 flex flex-col items-center justify-center text-center space-y-2 text-xs text-amber-300">
                             <AlertCircle className="w-7 h-7 text-amber-400" />
                             <p className="font-bold text-white">Camera Access Denied</p>
-                            <p className="text-slate-300 text-[11px]">
+                            <p className="text-slate-300 text-xs leading-relaxed">
                               Please enable camera permissions in your browser to scan the QR code.
                             </p>
                           </div>
@@ -1325,7 +1468,7 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
                           <div className="absolute inset-0 p-5 bg-black/90 flex flex-col items-center justify-center text-center space-y-2 text-xs text-slate-300">
                             <AlertCircle className="w-7 h-7 text-slate-400" />
                             <p className="font-bold text-white">No Camera Detected</p>
-                            <p className="text-slate-400 text-[11px]">
+                            <p className="text-slate-400 text-xs leading-relaxed">
                               No camera was found on this device.
                             </p>
                           </div>
@@ -1335,7 +1478,7 @@ export const TransferDataModal: React.FC<TransferDataModalProps> = ({
                           <div className="absolute inset-0 p-5 bg-black/90 flex flex-col items-center justify-center text-center space-y-2 text-xs text-slate-300">
                             <AlertCircle className="w-7 h-7 text-red-400" />
                             <p className="font-bold text-white">Camera Unavailable</p>
-                            <p className="text-slate-400 text-[11px]">
+                            <p className="text-slate-400 text-xs leading-relaxed">
                               Could not open camera stream. Ensure no other application is using it.
                             </p>
                           </div>

@@ -6,15 +6,18 @@ import { getManilaTodayString } from '../utils/dateUtils';
 import { getSongTagClass } from '../utils/songTagStyles';
 import { Music, Sparkles, Check, Plus, Search, HelpCircle, Flame, Clock, CalendarCheck } from 'lucide-react';
 
+import { resolveSlotSong } from '../utils/songResolveUtils';
+
 interface SongAutocompleteProps {
   value: string;
-  onChange: (val: string) => void;
+  onChange: (val: string, selectedSong?: Song) => void;
   category: 'praise' | 'worship';
   serviceDate: string;
   serviceType?: string;
   allSongs: Song[];
   schedules: Schedule[];
   currentLineupSongs?: string[];
+  currentLineupSongIds?: (string | undefined)[];
   currentSongIndex?: number;
   excludeScheduleId?: string;
   onOpenLibrary?: () => void;
@@ -30,6 +33,7 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
   allSongs,
   schedules,
   currentLineupSongs,
+  currentLineupSongIds,
   currentSongIndex,
   excludeScheduleId,
   onOpenLibrary,
@@ -57,27 +61,52 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
 
   const targetYM = serviceDate ? serviceDate.substring(0, 7) : getManilaTodayString().substring(0, 7);
 
-  // Collect all excluded titles and family members from the current active lineup
-  const excludedLineupTitles = React.useMemo(() => {
-    if (!currentLineupSongs || currentLineupSongs.length === 0) return new Set<string>();
-    const excluded = new Set<string>();
+  // Collect all excluded song IDs, family titles (for ID-matched/unambiguous entries), and unmatched raw titles
+  const excludedLineupState = React.useMemo(() => {
+    const excludedIds = new Set<string>();
+    const excludedTitles = new Set<string>();
+    if (!currentLineupSongs || currentLineupSongs.length === 0) {
+      return { excludedIds, excludedTitles };
+    }
 
     currentLineupSongs.forEach((songTitle, idx) => {
       // If currentSongIndex is passed, allow editing the current song slot without excluding itself
       if (currentSongIndex !== undefined && idx === currentSongIndex) {
         return;
       }
+      const slotId = (currentLineupSongIds?.[idx] || '').trim();
       const clean = (songTitle || '').trim().toLowerCase();
-      if (!clean) return;
-      excluded.add(clean);
+      if (!slotId && !clean) return;
 
-      // Add all Song Family member titles for this lineup song
-      const familyTitles = SongService.getFamilySongTitles(clean, allSongs);
-      familyTitles.forEach((t) => excluded.add(t));
+      if (slotId) {
+        excludedIds.add(slotId);
+        const famTitles = SongService.getFamilySongTitles(clean, allSongs, undefined, slotId);
+        famTitles.forEach((t) => {
+          const matchedFamSongs = allSongs.filter((s) => s.title.trim().toLowerCase() === t);
+          if (matchedFamSongs.length === 1) {
+            excludedIds.add(matchedFamSongs[0].id);
+          }
+        });
+        return;
+      }
+
+      const resolved = resolveSlotSong(songTitle, undefined, allSongs);
+      if (resolved.song) {
+        excludedIds.add(resolved.song.id);
+        const famTitles = SongService.getFamilySongTitles(resolved.song.title, allSongs, undefined, resolved.song.id);
+        famTitles.forEach((t) => {
+          const matchedFamSongs = allSongs.filter((s) => s.title.trim().toLowerCase() === t);
+          if (matchedFamSongs.length === 1) {
+            excludedIds.add(matchedFamSongs[0].id);
+          }
+        });
+      } else if (resolved.isUnmatched && clean) {
+        excludedTitles.add(clean);
+      }
     });
 
-    return excluded;
-  }, [currentLineupSongs, currentSongIndex, allSongs]);
+    return { excludedIds, excludedTitles };
+  }, [currentLineupSongs, currentLineupSongIds, currentSongIndex, allSongs]);
 
   // Filter songs for autocomplete dropdown
   const filteredSuggestions = React.useMemo(() => {
@@ -85,14 +114,20 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
       .filter((song) => {
         const titleLower = song.title.trim().toLowerCase();
 
-        // Exclude if already in active lineup
-        if (excludedLineupTitles.has(titleLower)) {
+        // Exclude if already in active lineup by authoritative ID or unmatched raw title
+        if (excludedLineupState.excludedIds.has(song.id) || excludedLineupState.excludedTitles.has(titleLower)) {
           return false;
         }
 
         // Exclude if any member of this candidate song's family is in active lineup
-        const candidateFamTitles = SongService.getFamilySongTitles(song.title, allSongs);
-        if (candidateFamTitles.some((t) => excludedLineupTitles.has(t))) {
+        const candidateFamTitles = SongService.getFamilySongTitles(song.title, allSongs, undefined, song.id);
+        if (
+          candidateFamTitles.some((t) => {
+            if (excludedLineupState.excludedTitles.has(t)) return true;
+            const famMatch = allSongs.filter((s) => s.title.trim().toLowerCase() === t);
+            return famMatch.length === 1 && excludedLineupState.excludedIds.has(famMatch[0].id);
+          })
+        ) {
           return false;
         }
 
@@ -117,10 +152,10 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
         );
       })
       .slice(0, 10); // Top 10 suggestions
-  }, [allSongs, excludedLineupTitles, category, query]);
+  }, [allSongs, excludedLineupState, category, query]);
 
   const handleSelectSong = (song: Song) => {
-    onChange(song.title);
+    onChange(song.title, song);
     setQuery(song.title);
     setIsOpen(false);
     setHighlightedIndex(-1);
@@ -129,7 +164,10 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
-    onChange(val);
+    const clean = val.trim().toLowerCase();
+    const exactMatches = clean ? allSongs.filter((s) => s.title.trim().toLowerCase() === clean) : [];
+    const matchedSong = exactMatches.length === 1 ? exactMatches[0] : undefined;
+    onChange(val, matchedSong);
     setIsOpen(true);
     setHighlightedIndex(-1);
   };
@@ -166,7 +204,7 @@ export const SongAutocomplete: React.FC<SongAutocompleteProps> = ({
   const getSongBadges = (song: Song) => {
     const badges: { label: string; className: string; type: 'month' | 'new' | 'frequent' }[] = [];
 
-    const usageCheck = SongService.checkMonthlyUsage(song.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs);
+    const usageCheck = SongService.checkMonthlyUsage(song.title, serviceDate, schedules, excludeScheduleId, serviceType, allSongs, undefined, song.id);
     if (usageCheck.timesUsedThisMonth > 0) {
       badges.push({
         label: `Used ${usageCheck.timesUsedThisMonth}x this month`,

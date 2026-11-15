@@ -1,6 +1,6 @@
 import { Schedule, CanonicalServiceType, CANONICAL_SERVICE_TYPES, normalizeServiceType, Song, Member, SongFamily } from '../types';
 import { getManilaDateParts, addDaysToDateString, getManilaTodayString, formatDateDisplayManila, getDaysInMonth } from './dateUtils';
-import { isScheduleEmpty } from './scheduleUtils';
+import { isPopulatedSchedule } from './scheduleUtils';
 import { StorageService } from '../services/storage';
 
 export type AnalyticsFilterMode = 'follow_saved' | 'date_range' | 'specific_dates' | 'all' | 'custom';
@@ -107,7 +107,7 @@ export function getMondayToSundayWeek(dateStr: string): {
  * Builds a 3-level hierarchy (Years -> Months -> Weeks) from all saved lineups.
  */
 export function buildScheduleDateHierarchy(schedules: Schedule[]): YearGroup[] {
-  const nonEmptySchedules = (schedules || []).filter((s) => !isScheduleEmpty(s));
+  const nonEmptySchedules = (schedules || []).filter((s) => isPopulatedSchedule(s));
   const yearMap = new Map<number, Map<number, Map<string, { week: ReturnType<typeof getMondayToSundayWeek>; scheduleIds: string[] }>>>();
 
   nonEmptySchedules.forEach((s) => {
@@ -216,7 +216,7 @@ export function filterSchedulesByScope(
   upcomingSchedules: Schedule[];
 } {
   const todayStr = getManilaTodayString();
-  const validSchedules = (schedules || []).filter((s) => !isScheduleEmpty(s));
+  const validSchedules = (schedules || []).filter((s) => isPopulatedSchedule(s));
 
   // 1. Service filter FIRST: if services array is empty, 0 schedules match!
   if (!scope.selectedServiceTypes || scope.selectedServiceTypes.length === 0) {
@@ -343,30 +343,69 @@ export interface SameMonthRepeatItem {
 }
 
 /**
- * Resolves the Song Family or canonical identity for a raw song title.
+ * Resolves the Song Family or canonical identity for a raw song title or song ID.
+ * Strictly ID-authoritative:
+ * - Non-empty stale songId (not in catalog) is isolated under `stale_${cleanId}` without title/family fallback.
+ * - No-ID slots match a catalog song only when title matches uniquely; duplicate titles remain isolated.
  */
 export function getCanonicalSongIdentity(
   rawTitle: string,
   songs: Song[] = [],
-  songFamilies: SongFamily[] = []
+  songFamilies: SongFamily[] = [],
+  songId?: string
 ): { canonicalKey: string; displayTitle: string } {
   const cleanTitle = (rawTitle || '').trim();
   const cleanLower = cleanTitle.toLowerCase();
+  const cleanId = (songId || '').trim();
 
-  const matchingSong = songs.find((s) => s.title.trim().toLowerCase() === cleanLower);
-  if (matchingSong && matchingSong.songFamilyId) {
-    const fam = songFamilies.find((f) => f.id === matchingSong.songFamilyId);
-    if (fam) {
-      return { canonicalKey: `fam_${fam.id}`, displayTitle: fam.name };
+  let matchingSong: Song | undefined;
+  let isAmbiguous = false;
+
+  if (cleanId) {
+    matchingSong = songs.find((s) => s.id === cleanId);
+    if (!matchingSong) {
+      return {
+        canonicalKey: `stale_${cleanId}`,
+        displayTitle: cleanTitle || 'Song unavailable'
+      };
+    }
+  } else if (cleanLower) {
+    const exactMatches = songs.filter((s) => s.title.trim().toLowerCase() === cleanLower);
+    if (exactMatches.length === 1) {
+      matchingSong = exactMatches[0];
+    } else if (exactMatches.length > 1) {
+      isAmbiguous = true;
     }
   }
 
-  const directFam = songFamilies.find((f) => f.name.trim().toLowerCase() === cleanLower);
-  if (directFam) {
-    return { canonicalKey: `fam_${directFam.id}`, displayTitle: directFam.name };
+  if (matchingSong) {
+    const fam =
+      (matchingSong.songFamilyId
+        ? songFamilies.find((f) => f.id === matchingSong!.songFamilyId)
+        : undefined) ||
+      songFamilies.find(
+        (f) =>
+          (f.versionIds && f.versionIds.includes(matchingSong!.id)) ||
+          (f.versions && f.versions.some((v) => v.songId === matchingSong!.id))
+      );
+    if (fam) {
+      return { canonicalKey: `fam_${fam.id}`, displayTitle: fam.name };
+    }
+    return { canonicalKey: `song_${matchingSong.id}`, displayTitle: matchingSong.title };
   }
 
-  return { canonicalKey: `song_${cleanLower}`, displayTitle: matchingSong ? matchingSong.title : cleanTitle };
+  if (isAmbiguous) {
+    return { canonicalKey: `ambiguous_${cleanLower}`, displayTitle: cleanTitle };
+  }
+
+  if (cleanLower) {
+    const matchingFamilies = songFamilies.filter((f) => f.name.trim().toLowerCase() === cleanLower);
+    if (matchingFamilies.length === 1) {
+      return { canonicalKey: `fam_${matchingFamilies[0].id}`, displayTitle: matchingFamilies[0].name };
+    }
+  }
+
+  return { canonicalKey: `song_${cleanLower}`, displayTitle: cleanTitle };
 }
 
 /**
@@ -396,12 +435,36 @@ export function calculateSameMonthRepeats(
     const monthKey = parts.yearMonth;
     const monthLabel = `${MONTH_NAMES[parts.month - 1]} ${parts.year}`;
 
-    const allSongs = [...(s.praiseSongs || []), ...(s.worshipSongs || [])];
-    allSongs.forEach((rawTitle) => {
+    // Praise songs
+    (s.praiseSongs || []).forEach((rawTitle, idx) => {
       const cleanTitle = (rawTitle || '').trim();
       if (!cleanTitle) return;
+      const songId = s.praiseSongIds?.[idx];
+      const identity = getCanonicalSongIdentity(cleanTitle, songs, songFamilies, songId);
+      const mapKey = `${monthKey}__${identity.canonicalKey}`;
+      let item = monthSongMap.get(mapKey);
+      if (!item) {
+        item = {
+          songTitle: identity.displayTitle,
+          monthKey,
+          monthLabel,
+          count: 0,
+          dates: new Set(),
+          scheduleIds: new Set()
+        };
+        monthSongMap.set(mapKey, item);
+      }
+      item.count += 1;
+      item.dates.add(s.serviceDate);
+      item.scheduleIds.add(s.id);
+    });
 
-      const identity = getCanonicalSongIdentity(cleanTitle, songs, songFamilies);
+    // Worship songs
+    (s.worshipSongs || []).forEach((rawTitle, idx) => {
+      const cleanTitle = (rawTitle || '').trim();
+      if (!cleanTitle) return;
+      const songId = s.worshipSongIds?.[idx];
+      const identity = getCanonicalSongIdentity(cleanTitle, songs, songFamilies, songId);
       const mapKey = `${monthKey}__${identity.canonicalKey}`;
       let item = monthSongMap.get(mapKey);
       if (!item) {

@@ -463,7 +463,7 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
             isBeingDragged
               ? isLowEndMode
                 ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 opacity-90'
-                : 'bg-white dark:bg-slate-850 border-[#1b75bc] dark:border-[#54b0e2] shadow-xl ring-2 ring-[#1b75bc]/30 scale-[1.01] z-20 opacity-95'
+                : 'bg-white dark:bg-black border-[#1b75bc] dark:border-[#54b0e2] shadow-xl ring-2 ring-[#1b75bc]/30 scale-[1.01] z-20 opacity-95'
               : isChecked
               ? 'bg-white/90 dark:bg-slate-900/90 border-slate-200/80 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20'
               : 'bg-slate-100/50 dark:bg-slate-900/40 border-slate-200/40 dark:border-white/5 opacity-55 hover:opacity-85'

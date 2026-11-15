@@ -871,12 +871,12 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
                         {showSetupGuide ? 'Hide Setup Help' : 'Setup Help'}
                       </button>
                     </div>
-                    <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                    <label className="flex items-center gap-2 pt-1 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={rememberApiKey}
                         onChange={(e) => handleToggleRememberKey(e.target.checked)}
-                        className="rounded border-slate-300 dark:border-slate-750 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        className="rounded border-slate-300 dark:border-white/10 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       />
                       <span>Remember this YouTube API key on this device (optional)</span>
                     </label>
@@ -884,12 +884,12 @@ export const SmartSongImportModal: React.FC<SmartSongImportModalProps> = ({
 
                   {/* Step-by-Step Setup Help */}
                   {showSetupGuide && (
-                    <div className="p-3 bg-white dark:bg-slate-900/90 rounded-lg border border-slate-200 dark:border-slate-750 text-[11px] text-slate-600 dark:text-slate-300 space-y-1.5 animate-fadeIn">
+                    <div className="p-3.5 bg-white dark:bg-black rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-600 dark:text-slate-300 space-y-2 animate-fadeIn">
                       <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                        <Info className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                        <Info className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
                         <span>How to get your YouTube Data API v3 key:</span>
                       </div>
-                      <ol className="list-decimal list-inside space-y-1 pl-1 text-[11px] leading-relaxed">
+                      <ol className="list-decimal list-inside space-y-1.5 pl-1 text-xs leading-relaxed">
                         <li>Click <strong>Get / Manage YouTube API Key</strong> above to open Google Cloud Console.</li>
                         <li>Select an existing project or click <em>New Project</em>.</li>
                         <li>Ensure <strong>YouTube Data API v3</strong> is enabled in <em>APIs &amp; Services &gt; Library</em>.</li>

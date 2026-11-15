@@ -566,17 +566,17 @@ export const SameNameSongsModal: React.FC<SameNameSongsModalProps> = ({
                       return (
                         <div
                           key={song.id}
-                          className="p-3.5 rounded-xl border border-slate-200/70 dark:border-white/5 bg-slate-50/50 dark:bg-slate-850/50 space-y-2 flex flex-col justify-between"
+                          className="p-3.5 rounded-xl border border-slate-200/70 dark:border-white/10 bg-slate-50/50 dark:bg-black/60 space-y-2 flex flex-col justify-between"
                         >
                           <div>
                             <div className="flex items-start justify-between gap-2">
                               <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-slate-100 line-clamp-1">
                                 {song.title}
                               </h5>
-                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md shrink-0 ${
+                              <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md shrink-0 ${
                                 song.category === 'praise'
-                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                  : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                  : 'bg-[#1b75bc]/15 text-[#1b75bc] dark:text-[#54b0e2]'
                               }`}>
                                 {song.category}
                               </span>

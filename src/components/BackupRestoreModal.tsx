@@ -1,9 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Member, Schedule, Song, SongFamily } from '../types';
+import { Member, Schedule, Song, SongFamily, LineupTemplate, MemberAvailability, SongFamiliarity } from '../types';
 import { StorageService } from '../services/storage';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
+import { TemplateService } from '../services/templateService';
+import { AvailabilityService, buildAvailabilityId } from '../services/availabilityService';
+import { FamiliarityService } from '../services/familiarityService';
 import { LineupHistoryService } from '../services/lineupHistoryService';
 import { BackupValidationService } from '../services/backupValidationService';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
@@ -41,6 +44,9 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
     schedules?: Schedule[];
     labels?: string[];
     songFamilies?: SongFamily[];
+    templates?: LineupTemplate[];
+    memberAvailability?: MemberAvailability[];
+    songFamiliarity?: SongFamiliarity[];
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,6 +62,9 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
   const handleDownloadBackup = async () => {
     try {
       const songFamilies = await SongFamilyService.getSongFamilies();
+      const templates = TemplateService.getTemplatesSync();
+      const memberAvailability = AvailabilityService.getAvailabilityListSync();
+      const songFamiliarity = FamiliarityService.getFamiliarityListSync();
       const backupObj = {
         app: 'WWCF Santa Cruz Worship Ministry',
         version: '1.0',
@@ -65,7 +74,10 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           songs,
           schedules,
           labels,
-          songFamilies
+          songFamilies,
+          templates,
+          memberAvailability,
+          songFamiliarity
         }
       };
 
@@ -117,11 +129,13 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
 
         const dataContent = validation.data;
         if (
-          dataContent.members.length === 0 &&
-          dataContent.songs.length === 0 &&
-          dataContent.schedules.length === 0
+          (dataContent.members?.length || 0) === 0 &&
+          (dataContent.songs?.length || 0) === 0 &&
+          (dataContent.schedules?.length || 0) === 0 &&
+          (dataContent.songFamilies?.length || 0) === 0 &&
+          (dataContent.templates?.length || 0) === 0
         ) {
-          showToast('No valid church members, songs, or lineups found in this backup file.', 'danger');
+          showToast('No valid church members, songs, families, templates, or lineups found in this backup file.', 'danger');
           return;
         }
 
@@ -130,7 +144,10 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           songs: dataContent.songs,
           schedules: dataContent.schedules,
           labels: dataContent.labels,
-          songFamilies: dataContent.songFamilies
+          songFamilies: dataContent.songFamilies,
+          templates: dataContent.templates,
+          memberAvailability: dataContent.memberAvailability,
+          songFamiliarity: dataContent.songFamiliarity
         });
         setIsConfirmingRestore(true);
       } catch (err) {
@@ -152,21 +169,30 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
     const prevSchedules = StorageService.getSchedules();
     const prevSongs = await SongService.getSongs();
     const prevFamilies = await SongFamilyService.getSongFamilies();
+    const prevTemplates = TemplateService.getTemplatesSync();
+    const prevAvailability = AvailabilityService.getAvailabilityListSync();
+    const prevFamiliarity = FamiliarityService.getFamiliarityListSync();
 
     const rollback = async () => {
-      StorageService.saveMembers(prevMembers);
-      StorageService.saveLabels(prevLabels);
-      StorageService.saveSchedules(prevSchedules);
+      StorageService.saveMembersChecked(prevMembers);
+      StorageService.saveLabelsChecked(prevLabels);
+      StorageService.saveSchedulesChecked(prevSchedules);
       await SongService.saveSongsList(prevSongs);
       await SongFamilyService.saveSongFamilies(prevFamilies);
+      TemplateService.saveTemplatesSync(prevTemplates);
+      AvailabilityService.saveAvailabilityListSync(prevAvailability);
+      FamiliarityService.saveFamiliarityListSync(prevFamiliarity);
     };
 
     try {
-      let finalMembers = pendingRestoreData.members || [];
-      let finalSongs = pendingRestoreData.songs || [];
-      let finalSchedules = pendingRestoreData.schedules || [];
-      let finalLabels = pendingRestoreData.labels || [];
-      let finalFamilies = pendingRestoreData.songFamilies || [];
+      let finalMembers = pendingRestoreData.members !== undefined ? pendingRestoreData.members : prevMembers;
+      let finalSongs = pendingRestoreData.songs !== undefined ? pendingRestoreData.songs : prevSongs;
+      let finalSchedules = pendingRestoreData.schedules !== undefined ? pendingRestoreData.schedules : prevSchedules;
+      let finalLabels = pendingRestoreData.labels !== undefined ? pendingRestoreData.labels : prevLabels;
+      let finalFamilies = pendingRestoreData.songFamilies !== undefined ? pendingRestoreData.songFamilies : prevFamilies;
+      let finalTemplates = pendingRestoreData.templates !== undefined ? pendingRestoreData.templates : prevTemplates;
+      let finalAvailability = pendingRestoreData.memberAvailability !== undefined ? pendingRestoreData.memberAvailability : prevAvailability;
+      let finalFamiliarity = pendingRestoreData.songFamiliarity !== undefined ? pendingRestoreData.songFamiliarity : prevFamiliarity;
 
       if (restoreMode === 'merge') {
         // Merge Members by id or lowercase name
@@ -195,14 +221,35 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         const existingFamNames = new Set(prevFamilies.map(f => f.name.toLowerCase().trim()));
         const newFamilies = (pendingRestoreData.songFamilies || []).filter(f => !existingFamNames.has(f.name.toLowerCase().trim()));
         finalFamilies = [...prevFamilies, ...newFamilies];
+
+        // Merge Templates by id or name
+        const tplKey = (t: LineupTemplate) => t.id || t.name.toLowerCase().trim();
+        const existingTplKeys = new Set(prevTemplates.map(tplKey));
+        const newTemplates = (pendingRestoreData.templates || []).filter(t => !existingTplKeys.has(tplKey(t)));
+        finalTemplates = [...prevTemplates, ...newTemplates];
+
+        // Merge Member Availability by composite id or service-type-scoped key
+        const availKey = (a: MemberAvailability) => a.id || buildAvailabilityId(a.memberId, a.date, a.serviceType);
+        const existingAvailKeys = new Set(prevAvailability.map(availKey));
+        const newAvail = (pendingRestoreData.memberAvailability || []).filter(a => !existingAvailKeys.has(availKey(a)));
+        finalAvailability = [...prevAvailability, ...newAvail];
+
+        // Merge Song Familiarity by composite id or `${memberId}_${songId}`
+        const famKey = (f: SongFamiliarity) => f.id || `${f.memberId}_${f.songId}`;
+        const existingFamKeys = new Set(prevFamiliarity.map(famKey));
+        const newFam = (pendingRestoreData.songFamiliarity || []).filter(f => !existingFamKeys.has(famKey(f)));
+        finalFamiliarity = [...prevFamiliarity, ...newFam];
       }
 
-      // Atomic commit
-      StorageService.saveMembers(finalMembers);
-      StorageService.saveLabels(finalLabels);
-      StorageService.saveSchedules(finalSchedules);
+      // Atomic commit using verified throwing writers
+      StorageService.saveMembersChecked(finalMembers);
+      StorageService.saveLabelsChecked(finalLabels);
+      StorageService.saveSchedulesChecked(finalSchedules);
       await SongService.saveSongsList(finalSongs);
       await SongFamilyService.saveSongFamilies(finalFamilies);
+      TemplateService.saveTemplatesSync(finalTemplates);
+      AvailabilityService.saveAvailabilityListSync(finalAvailability);
+      FamiliarityService.saveFamiliarityListSync(finalFamiliarity);
 
       onDataRestored();
 
@@ -214,11 +261,14 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           onDataRestored();
         },
         redo: async () => {
-          StorageService.saveMembers(finalMembers);
-          StorageService.saveLabels(finalLabels);
-          StorageService.saveSchedules(finalSchedules);
+          StorageService.saveMembersChecked(finalMembers);
+          StorageService.saveLabelsChecked(finalLabels);
+          StorageService.saveSchedulesChecked(finalSchedules);
           await SongService.saveSongsList(finalSongs);
           await SongFamilyService.saveSongFamilies(finalFamilies);
+          TemplateService.saveTemplatesSync(finalTemplates);
+          AvailabilityService.saveAvailabilityListSync(finalAvailability);
+          FamiliarityService.saveFamiliarityListSync(finalFamiliarity);
           onDataRestored();
         }
       });
@@ -329,7 +379,7 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 text-[11px] leading-snug border border-amber-200/60 dark:border-amber-800/50">
+          <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 text-xs leading-relaxed border border-amber-200/60 dark:border-amber-800/50">
             <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
               All church data is automatically saved locally. Creating regular backups guarantees you can restore your data anytime.
@@ -347,23 +397,41 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
               </div>
 
               {/* Item Count Preview */}
-              <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 rounded-xl bg-slate-50 dark:bg-black/60 border border-slate-200/80 dark:border-white/10 text-xs">
                 <div>
                   <span className="text-slate-500 dark:text-slate-400">Members:</span>{' '}
-                  <strong className="text-slate-900 dark:text-slate-100">{pendingRestoreData.members?.length || 0}</strong>
+                  <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.members?.length || 0}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500 dark:text-slate-400">Songs:</span>{' '}
-                  <strong className="text-slate-900 dark:text-slate-100">{pendingRestoreData.songs?.length || 0}</strong>
+                  <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.songs?.length || 0}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500 dark:text-slate-400">Saved Line-ups:</span>{' '}
-                  <strong className="text-slate-900 dark:text-slate-100">{pendingRestoreData.schedules?.length || 0}</strong>
+                  <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.schedules?.length || 0}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500 dark:text-slate-400">Song Families:</span>{' '}
-                  <strong className="text-slate-900 dark:text-slate-100">{pendingRestoreData.songFamilies?.length || 0}</strong>
+                  <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.songFamilies?.length || 0}</strong>
                 </div>
+                {(pendingRestoreData.templates?.length || 0) > 0 && (
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Templates:</span>{' '}
+                    <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.templates?.length}</strong>
+                  </div>
+                )}
+                {(pendingRestoreData.memberAvailability?.length || 0) > 0 && (
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Availability:</span>{' '}
+                    <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.memberAvailability?.length}</strong>
+                  </div>
+                )}
+                {(pendingRestoreData.songFamiliarity?.length || 0) > 0 && (
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Familiarity:</span>{' '}
+                    <strong className="text-slate-900 dark:text-slate-100 tabular-nums">{pendingRestoreData.songFamiliarity?.length}</strong>
+                  </div>
+                )}
               </div>
 
               {/* Restore Mode Selection */}
@@ -375,17 +443,17 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setRestoreMode('replace')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                       restoreMode === 'replace'
-                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
-                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        ? 'border-[#1b75bc] bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20 ring-1 ring-[#1b75bc]'
+                        : 'border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900 dark:text-slate-100 mb-1">
-                      <RefreshCw className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <RefreshCw className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                       <span>Replace All Data</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                       Replaces all existing records with the contents of this backup file.
                     </p>
                   </button>
@@ -393,17 +461,17 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setRestoreMode('merge')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                       restoreMode === 'merge'
-                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 ring-1 ring-indigo-500'
-                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        ? 'border-[#1b75bc] bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20 ring-1 ring-[#1b75bc]'
+                        : 'border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900 dark:text-slate-100 mb-1">
                       <GitMerge className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                       <span>Merge With Current</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                       Keeps current records and adds unique items from the backup.
                     </p>
                   </button>

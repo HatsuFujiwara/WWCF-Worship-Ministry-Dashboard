@@ -1,4 +1,4 @@
-import { ServiceType, MinistryAssignment } from '../types';
+import { ServiceType, MinistryAssignment, RehearsalChecklist } from '../types';
 import { StorageService } from './storage';
 
 export interface SchedulerSnapshot {
@@ -8,7 +8,15 @@ export interface SchedulerSnapshot {
   worshipSongs: string[];
   praiseSongKeys: string[];
   worshipSongKeys: string[];
+  praiseSongIds?: (string | undefined)[];
+  worshipSongIds?: (string | undefined)[];
   ministryRows: MinistryAssignment[];
+  notes?: string;
+  transitionNotes?: Record<string, string>;
+  rehearsalChecklist?: RehearsalChecklist;
+  noService?: boolean;
+  noServiceReason?: string;
+  editingScheduleId?: string | null;
 }
 
 export interface AppHistoryAction {
@@ -51,7 +59,15 @@ function cloneSnapshot(snapshot: SchedulerSnapshot): SchedulerSnapshot {
     worshipSongs: [...snapshot.worshipSongs],
     praiseSongKeys: [...snapshot.praiseSongKeys],
     worshipSongKeys: [...snapshot.worshipSongKeys],
-    ministryRows: JSON.parse(JSON.stringify(snapshot.ministryRows || []))
+    praiseSongIds: snapshot.praiseSongIds ? [...snapshot.praiseSongIds] : undefined,
+    worshipSongIds: snapshot.worshipSongIds ? [...snapshot.worshipSongIds] : undefined,
+    ministryRows: JSON.parse(JSON.stringify(snapshot.ministryRows || [])),
+    notes: snapshot.notes,
+    transitionNotes: snapshot.transitionNotes ? { ...snapshot.transitionNotes } : undefined,
+    rehearsalChecklist: snapshot.rehearsalChecklist ? { ...snapshot.rehearsalChecklist } : undefined,
+    noService: snapshot.noService === true ? true : undefined,
+    noServiceReason: snapshot.noServiceReason,
+    editingScheduleId: snapshot.editingScheduleId !== undefined ? snapshot.editingScheduleId : undefined
   };
 }
 
@@ -234,17 +250,32 @@ export class LineupHistoryService {
 
     // 2. Persist to draft schedule storage so unmounted/next mount loads it
     try {
-      StorageService.saveDraftSchedule({
+      StorageService.saveDraftScheduleChecked({
         serviceType: snap.serviceType,
         serviceDate: snap.serviceDate,
         praiseSongs: [...snap.praiseSongs],
         worshipSongs: [...snap.worshipSongs],
         praiseSongKeys: [...snap.praiseSongKeys],
         worshipSongKeys: [...snap.worshipSongKeys],
-        ministryAssignments: JSON.parse(JSON.stringify(snap.ministryRows || []))
+        praiseSongIds: snap.praiseSongIds ? [...snap.praiseSongIds] : undefined,
+        worshipSongIds: snap.worshipSongIds ? [...snap.worshipSongIds] : undefined,
+        ministryAssignments: JSON.parse(JSON.stringify(snap.ministryRows || [])),
+        notes: snap.notes,
+        transitionNotes: snap.transitionNotes ? { ...snap.transitionNotes } : undefined,
+        rehearsalChecklist: snap.rehearsalChecklist ? { ...snap.rehearsalChecklist } : undefined,
+        noService: snap.noService === true ? true : undefined,
+        noServiceReason: snap.noServiceReason,
+        editingScheduleId: snap.editingScheduleId !== undefined ? snap.editingScheduleId : undefined
       });
     } catch (e) {
       console.warn('[LineupHistoryService] Failed to update draft schedule during undo:', e);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('wwcf:storage-warning', {
+            detail: { message: 'Undo applied in editor, but browser storage could not persist the draft.' }
+          })
+        );
+      }
     }
   }
 

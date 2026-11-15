@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ActiveTab,
   Member,
@@ -100,6 +100,8 @@ export default function App() {
   };
 
   // Data State
+  const startupStorageWarningRef = useRef<string | null>(null);
+  const lastWarningShownRef = useRef<{ text: string; time: number } | null>(null);
   const [members, setMembers] = useState<Member[]>(() => StorageService.getMembers());
   const [labels, setLabels] = useState<string[]>(() => StorageService.getLabels());
   const [schedules, setSchedules] = useState<Schedule[]>(() => {
@@ -107,7 +109,13 @@ export default function App() {
     const currentYM = getManilaTodayString().substring(0, 7);
     const withPlaceholders = ensureMonthlyPlaceholders(currentYM, loaded);
     if (withPlaceholders.length !== loaded.length) {
-      StorageService.saveSchedules(withPlaceholders);
+      try {
+        StorageService.saveSchedulesChecked(withPlaceholders);
+      } catch (e) {
+        console.error('[App] Failed to persist initial monthly placeholders:', e);
+        startupStorageWarningRef.current =
+          'Could not persist monthly schedule placeholders because browser storage is unavailable or full.';
+      }
     }
     return withPlaceholders;
   });
@@ -230,16 +238,29 @@ export default function App() {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [initialTransferParams, setInitialTransferParams] = useState<{ sessionId: string; token: string } | null>(null);
 
-  // Auto-detect transfer session from URL parameters (e.g., when scanned via phone camera)
+  // Auto-detect transfer session from URL parameters (supports URL fragment hash and search parameters)
   useEffect(() => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const sid = urlParams.get('transferSessionId');
-      const tok = urlParams.get('token');
+      let sid: string | null = null;
+      let tok: string | null = null;
+
+      if (window.location.hash) {
+        const hashStr = window.location.hash.substring(1);
+        const hashParams = new URLSearchParams(hashStr);
+        sid = hashParams.get('transferSessionId') || hashParams.get('sessionId');
+        tok = hashParams.get('token');
+      }
+
+      if (!sid || !tok) {
+        const urlParams = new URLSearchParams(window.location.search);
+        sid = urlParams.get('transferSessionId') || urlParams.get('sessionId');
+        tok = urlParams.get('token');
+      }
+
       if (sid && tok) {
         setInitialTransferParams({ sessionId: sid, token: tok });
         setIsTransferModalOpen(true);
-        // Clean URL search string without reloading
+        // Clean URL search and hash string without reloading
         window.history.replaceState({}, '', window.location.pathname);
       }
     } catch (e) {
@@ -442,11 +463,46 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Surface storage corruption/quota warnings emitted by services
+  useEffect(() => {
+    const emitWarningToast = (msg: string) => {
+      if (!msg) return;
+      const now = Date.now();
+      if (
+        lastWarningShownRef.current &&
+        lastWarningShownRef.current.text === msg &&
+        now - lastWarningShownRef.current.time < 5000
+      ) {
+        return;
+      }
+      lastWarningShownRef.current = { text: msg, time: now };
+      showToast(msg, 'danger');
+    };
+
+    if (startupStorageWarningRef.current) {
+      const pending = startupStorageWarningRef.current;
+      startupStorageWarningRef.current = null;
+      emitWarningToast(pending);
+    }
+
+    const handleStorageWarning = (e: Event) => {
+      const detail = (e as CustomEvent<{ message?: string }>).detail;
+      if (detail?.message) {
+        emitWarningToast(detail.message);
+      }
+    };
+
+    window.addEventListener('wwcf:storage-warning', handleStorageWarning);
+    return () => {
+      window.removeEventListener('wwcf:storage-warning', handleStorageWarning);
+    };
+  }, [accessibilitySettings.visualToastAlerts]);
+
   // Schedule Operations
   const handleSaveSchedule = (
     scheduleData: Omit<Schedule, 'id' | 'updatedAt'>,
     id?: string
-  ) => {
+  ): boolean => {
     const prevSchedules = [...schedules];
     let updatedSchedules: Schedule[];
 
@@ -461,7 +517,6 @@ export default function App() {
           ? { ...scheduleData, id: targetId, updatedAt: getManilaNowISO() }
           : s
       );
-      showToast('Worship schedule saved successfully!', 'success');
     } else {
       // Create brand new schedule with unique ID
       const newId = `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -485,29 +540,46 @@ export default function App() {
           updatedSchedules = [newSchedule, ...schedules];
         }
       }
-      showToast('New worship schedule saved to history!', 'success');
     }
 
     const nextSchedules = [...updatedSchedules];
+    try {
+      StorageService.saveSchedulesChecked(updatedSchedules);
+    } catch (err) {
+      console.error('[App] Failed to persist schedule:', err);
+      showToast('Could not save worship schedule. Browser storage may be full.', 'danger');
+      return false;
+    }
+
     LineupHistoryService.pushAppAction({
       description: existingIndex >= 0 && targetId
         ? `Saved changes to ${scheduleData.serviceDate} (${scheduleData.serviceType})`
         : `Created lineup for ${scheduleData.serviceDate} (${scheduleData.serviceType})`,
       undo: () => {
+        StorageService.saveSchedulesChecked(prevSchedules);
         setSchedules(prevSchedules);
-        StorageService.saveSchedules(prevSchedules);
       },
       redo: () => {
+        StorageService.saveSchedulesChecked(nextSchedules);
         setSchedules(nextSchedules);
-        StorageService.saveSchedules(nextSchedules);
       }
     });
 
     setSchedules(updatedSchedules);
-    StorageService.saveSchedules(updatedSchedules);
-    StorageService.saveDraftSchedule(null);
+    try {
+      StorageService.saveDraftScheduleChecked(null);
+    } catch (e) {
+      console.warn('[App] Failed to clear draft after schedule save:', e);
+    }
     setEditingSchedule(null);
     setActiveTab('schedules');
+    showToast(
+      existingIndex >= 0 && targetId
+        ? 'Worship schedule saved successfully!'
+        : 'New worship schedule saved to history!',
+      'success'
+    );
+    return true;
   };
 
   const handleEditScheduleFromList = (schedule: Schedule) => {
@@ -522,6 +594,14 @@ export default function App() {
       ...schedule,
       id: '',
       serviceDate: nextDate,
+      rehearsalChecklist: {
+        songSelectionFinalized: false,
+        performedKeysChecked: false,
+        lyricsReviewed: false,
+        referencesChecked: false,
+        teamAssignmentsFinalized: false,
+        transitionsPrepared: false
+      },
       updatedAt: getManilaNowISO()
     };
     setEditingSchedule(duplicated);
@@ -542,20 +622,26 @@ export default function App() {
       onConfirm: () => {
         const prevSchedules = [...schedules];
         const filtered = schedules.filter((s) => s.id !== id);
+        try {
+          StorageService.saveSchedulesChecked(filtered);
+        } catch (err) {
+          console.error('[App] Failed to delete schedule:', err);
+          showToast('Could not delete line-up. Browser storage may be full.', 'danger');
+          return;
+        }
         setSchedules(filtered);
-        StorageService.saveSchedules(filtered);
         showToast('Line-up deleted.', 'success');
 
         LineupHistoryService.pushAppAction({
           description: `Deleted lineup for ${target.serviceDate} (${target.serviceType})`,
           undo: () => {
+            StorageService.saveSchedulesChecked(prevSchedules);
             setSchedules(prevSchedules);
-            StorageService.saveSchedules(prevSchedules);
           },
           redo: () => {
             const nextFiltered = prevSchedules.filter((s) => s.id !== id);
+            StorageService.saveSchedulesChecked(nextFiltered);
             setSchedules(nextFiltered);
-            StorageService.saveSchedules(nextFiltered);
           }
         });
       }
@@ -574,20 +660,26 @@ export default function App() {
         const prevSchedules = [...schedules];
         const idSet = new Set(ids);
         const filtered = schedules.filter((s) => !idSet.has(s.id));
+        try {
+          StorageService.saveSchedulesChecked(filtered);
+        } catch (err) {
+          console.error('[App] Failed to bulk delete schedules:', err);
+          showToast('Could not delete selected line-ups. Browser storage error.', 'danger');
+          return;
+        }
         setSchedules(filtered);
-        StorageService.saveSchedules(filtered);
         showToast(`Successfully deleted ${ids.length} line-up${ids.length > 1 ? 's' : ''}.`, 'success');
 
         LineupHistoryService.pushAppAction({
           description: `Deleted ${ids.length} line-up${ids.length > 1 ? 's' : ''}`,
           undo: () => {
+            StorageService.saveSchedulesChecked(prevSchedules);
             setSchedules(prevSchedules);
-            StorageService.saveSchedules(prevSchedules);
           },
           redo: () => {
             const nextFiltered = prevSchedules.filter((s) => !idSet.has(s.id));
+            StorageService.saveSchedulesChecked(nextFiltered);
             setSchedules(nextFiltered);
-            StorageService.saveSchedules(nextFiltered);
           }
         });
       }
@@ -601,8 +693,12 @@ export default function App() {
       message: 'Are you sure you want to clear all current song inputs and assignments?',
       isDanger: true,
       onConfirm: () => {
+        try {
+          StorageService.saveDraftScheduleChecked(null);
+        } catch (err) {
+          console.warn('[App] Failed to clear draft during form reset:', err);
+        }
         setEditingSchedule(null);
-        StorageService.saveDraftSchedule(null);
         window.dispatchEvent(new CustomEvent('wwcf:reset-scheduler-form'));
         showToast('Scheduler form reset.', 'info');
       }
@@ -610,9 +706,14 @@ export default function App() {
   };
 
   const handleTriggerDraft = (draft: Partial<Schedule>) => {
-    StorageService.saveDraftSchedule(draft);
-    setIsDraftSaved(true);
-    setTimeout(() => setIsDraftSaved(false), 2000);
+    try {
+      StorageService.saveDraftScheduleChecked(draft);
+      setIsDraftSaved(true);
+      setTimeout(() => setIsDraftSaved(false), 2000);
+    } catch (err) {
+      console.error('[App] Failed to save draft schedule:', err);
+      showToast('Could not save draft. Browser storage may be full.', 'danger');
+    }
   };
 
   // Member Operations
@@ -636,20 +737,27 @@ export default function App() {
     }
 
     const nextMembers = [...updatedMembers];
+    try {
+      StorageService.saveMembersChecked(updatedMembers);
+    } catch (err) {
+      console.error('[App] Failed to save member:', err);
+      showToast('Could not save team member. Browser storage may be full.', 'danger');
+      return;
+    }
+
     LineupHistoryService.pushAppAction({
       description: id ? `Updated member "${memberData.name}"` : `Added member "${memberData.name}"`,
       undo: () => {
+        StorageService.saveMembersChecked(prevMembers);
         setMembers(prevMembers);
-        StorageService.saveMembers(prevMembers);
       },
       redo: () => {
+        StorageService.saveMembersChecked(nextMembers);
         setMembers(nextMembers);
-        StorageService.saveMembers(nextMembers);
       }
     });
 
     setMembers(updatedMembers);
-    StorageService.saveMembers(updatedMembers);
   };
 
   const handleDeleteMember = (id: string) => {
@@ -663,20 +771,26 @@ export default function App() {
       onConfirm: () => {
         const prevMembers = [...members];
         const filtered = members.filter((m) => m.id !== id);
+        try {
+          StorageService.saveMembersChecked(filtered);
+        } catch (err) {
+          console.error('[App] Failed to delete member:', err);
+          showToast('Could not remove member. Browser storage error.', 'danger');
+          return;
+        }
         setMembers(filtered);
-        StorageService.saveMembers(filtered);
         showToast('Member removed from roster.', 'success');
 
         LineupHistoryService.pushAppAction({
           description: `Removed member "${memberObj?.name || 'team member'}"`,
           undo: () => {
+            StorageService.saveMembersChecked(prevMembers);
             setMembers(prevMembers);
-            StorageService.saveMembers(prevMembers);
           },
           redo: () => {
             const nextFiltered = prevMembers.filter((m) => m.id !== id);
+            StorageService.saveMembersChecked(nextFiltered);
             setMembers(nextFiltered);
-            StorageService.saveMembers(nextFiltered);
           }
         });
       }
@@ -687,18 +801,24 @@ export default function App() {
     if (!labels.includes(newLabel)) {
       const prevLabels = [...labels];
       const updated = sortTags([...labels, newLabel]);
+      try {
+        StorageService.saveLabelsChecked(updated);
+      } catch (err) {
+        console.error('[App] Failed to save custom label:', err);
+        showToast('Could not save custom ministry tag. Browser storage may be full.', 'danger');
+        return;
+      }
       setLabels(updated);
-      StorageService.saveLabels(updated);
 
       LineupHistoryService.pushAppAction({
         description: `Added ministry tag "${newLabel}"`,
         undo: () => {
+          StorageService.saveLabelsChecked(prevLabels);
           setLabels(prevLabels);
-          StorageService.saveLabels(prevLabels);
         },
         redo: () => {
+          StorageService.saveLabelsChecked(updated);
           setLabels(updated);
-          StorageService.saveLabels(updated);
         }
       });
     }
@@ -712,7 +832,7 @@ export default function App() {
     }
     try {
       const { exportLineupAsPDF } = await import('./services/exportService');
-      await exportLineupAsPDF(schedule);
+      await exportLineupAsPDF(schedule, songs);
       showToast('Worship schedule exported as PDF!', 'success');
     } catch (err) {
       console.error('Failed to export PDF:', err);
@@ -728,7 +848,7 @@ export default function App() {
     }
     try {
       const { exportLineupAsPNG } = await import('./services/exportService');
-      await exportLineupAsPNG(schedule);
+      await exportLineupAsPNG(schedule, songs);
       showToast('Worship schedule exported as PNG image!', 'success');
     } catch (err) {
       console.error('Failed to export PNG:', err);
@@ -737,25 +857,36 @@ export default function App() {
   };
 
   const handleUpdateSchedules = (updatedSchedules: Schedule[]) => {
-    setSchedules(updatedSchedules);
-    StorageService.saveSchedules(updatedSchedules);
+    try {
+      StorageService.saveSchedulesChecked(updatedSchedules);
+      setSchedules(updatedSchedules);
+    } catch (err) {
+      console.error('[App] Failed to update schedules:', err);
+      showToast('Could not save schedule changes. Browser storage may be full.', 'danger');
+    }
   };
 
   const handleSaveMembers = (updatedMembers: Member[]) => {
     const prevMembers = [...members];
     const nextMembers = [...updatedMembers];
+    try {
+      StorageService.saveMembersChecked(updatedMembers);
+    } catch (err) {
+      console.error('[App] Failed to save members:', err);
+      showToast('Could not save roster updates. Browser storage may be full.', 'danger');
+      return;
+    }
     setMembers(updatedMembers);
-    StorageService.saveMembers(updatedMembers);
 
     LineupHistoryService.pushAppAction({
       description: 'Updated roster members',
       undo: () => {
+        StorageService.saveMembersChecked(prevMembers);
         setMembers(prevMembers);
-        StorageService.saveMembers(prevMembers);
       },
       redo: () => {
+        StorageService.saveMembersChecked(nextMembers);
         setMembers(nextMembers);
-        StorageService.saveMembers(nextMembers);
       }
     });
   };
@@ -790,8 +921,12 @@ export default function App() {
       updatedAt: getManilaNowISO()
     };
 
+    try {
+      StorageService.saveDraftScheduleChecked(null);
+    } catch (err) {
+      console.warn('[App] Failed to clear stale draft when creating lineup:', err);
+    }
     setEditingSchedule(newSchedule);
-    StorageService.saveDraftSchedule(null);
     setActiveTab('scheduler');
     showToast(`Created new lineup for ${serviceType} on ${serviceDate}.`, 'success');
   };
@@ -1017,6 +1152,7 @@ export default function App() {
                   <SongsView
                     songs={songs}
                     schedules={schedules}
+                    members={members}
                     onRefreshSongs={loadSongs}
                     onUpdateSchedules={handleUpdateSchedules}
                     showToast={showToast}

@@ -16,8 +16,11 @@
 import { StorageService } from './storage';
 import { SongService } from './songService';
 import { SongFamilyService } from './songFamilyService';
+import { TemplateService } from './templateService';
+import { AvailabilityService, buildAvailabilityId } from './availabilityService';
+import { FamiliarityService } from './familiarityService';
 import { BackupValidationService } from './backupValidationService';
-import { Member, Schedule, Song, SongFamily } from '../types';
+import { Member, Schedule, Song, SongFamily, LineupTemplate, MemberAvailability, SongFamiliarity } from '../types';
 
 export type GoogleSyncStatus =
   | 'disconnected'
@@ -141,7 +144,7 @@ const candidateListeners = new Set<MultipleCandidatesListener>();
 let autoSyncTimeout: any = null;
 
 function normalizeAccountKey(id?: string): string {
-  if (!id || !id.trim()) return 'default';
+  if (!id || !id.trim()) return '';
   return id.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
 
@@ -211,19 +214,25 @@ export class GoogleAuthService {
   }
 
   /**
-   * Account key based on normalized Google User ID (sub) or fallback email for account-scoped persistence
+   * Account key based on normalized Google User ID (sub) or fallback email for account-scoped persistence.
+   * Returns null if unauthenticated.
    */
-  static getAccountKey(): string {
+  static getAccountKey(): string | null {
     const sub =
       memoryProfile?.sub ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_USER_SUB) || '' : '');
     if (sub && sub.trim()) {
-      return normalizeAccountKey(sub);
+      const key = normalizeAccountKey(sub);
+      if (key) return key;
     }
     const email =
       memoryProfile?.email ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_USER_EMAIL) || '' : '');
-    return normalizeAccountKey(email);
+    if (email && email.trim()) {
+      const key = normalizeAccountKey(email);
+      if (key) return key;
+    }
+    return null;
   }
 
   /**
@@ -261,69 +270,62 @@ export class GoogleAuthService {
   }
 
   /**
-   * Last sync timestamp string
+   * Last sync timestamp string strictly scoped to the active Google account
    */
   static getLastSyncedAt(): string | null {
-    if (typeof localStorage !== 'undefined') {
-      const scopedKey = `${BASE_LAST_SYNC}_${this.getAccountKey()}`;
-      return localStorage.getItem(scopedKey) || localStorage.getItem(BASE_LAST_SYNC);
-    }
-    return null;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(`${BASE_LAST_SYNC}_${acct}`);
   }
 
   static setLastSyncedAt(time: string | null): void {
-    if (typeof localStorage === 'undefined') return;
-    const scopedKey = `${BASE_LAST_SYNC}_${this.getAccountKey()}`;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return;
+    const scopedKey = `${BASE_LAST_SYNC}_${acct}`;
     if (time) {
       localStorage.setItem(scopedKey, time);
-      localStorage.setItem(BASE_LAST_SYNC, time);
     } else {
       localStorage.removeItem(scopedKey);
-      localStorage.removeItem(BASE_LAST_SYNC);
     }
   }
 
   /**
-   * Persisted Drive file ID
+   * Persisted Drive file ID strictly scoped to the active Google account
    */
   static getPersistedDriveFileId(): string | null {
-    if (typeof localStorage !== 'undefined') {
-      const scopedKey = `${BASE_DRIVE_FILE_ID}_${this.getAccountKey()}`;
-      return localStorage.getItem(scopedKey) || localStorage.getItem(BASE_DRIVE_FILE_ID);
-    }
-    return null;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(`${BASE_DRIVE_FILE_ID}_${acct}`);
   }
 
   static setPersistedDriveFileId(fileId: string | null): void {
-    if (typeof localStorage === 'undefined') return;
-    const scopedKey = `${BASE_DRIVE_FILE_ID}_${this.getAccountKey()}`;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return;
+    const scopedKey = `${BASE_DRIVE_FILE_ID}_${acct}`;
     if (fileId) {
       localStorage.setItem(scopedKey, fileId);
     } else {
       localStorage.removeItem(scopedKey);
-      localStorage.removeItem(BASE_DRIVE_FILE_ID);
     }
   }
 
   /**
-   * Persisted last seen remote modified time
+   * Persisted last seen remote modified time strictly scoped to the active Google account
    */
   static getRemoteModifiedTime(): string | null {
-    if (typeof localStorage !== 'undefined') {
-      const scopedKey = `${BASE_REMOTE_MODIFIED_TIME}_${this.getAccountKey()}`;
-      return localStorage.getItem(scopedKey) || localStorage.getItem(BASE_REMOTE_MODIFIED_TIME);
-    }
-    return null;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(`${BASE_REMOTE_MODIFIED_TIME}_${acct}`);
   }
 
   static setRemoteModifiedTime(time: string | null): void {
-    if (typeof localStorage === 'undefined') return;
-    const scopedKey = `${BASE_REMOTE_MODIFIED_TIME}_${this.getAccountKey()}`;
+    const acct = this.getAccountKey();
+    if (!acct || typeof localStorage === 'undefined') return;
+    const scopedKey = `${BASE_REMOTE_MODIFIED_TIME}_${acct}`;
     if (time) {
       localStorage.setItem(scopedKey, time);
     } else {
       localStorage.removeItem(scopedKey);
-      localStorage.removeItem(BASE_REMOTE_MODIFIED_TIME);
     }
   }
 
@@ -464,37 +466,59 @@ export class GoogleAuthService {
             }
 
             memoryAccessToken = response.access_token;
-            const grantedStr: string = response.scope || targetScopes;
+            // Derive granted scopes strictly from actual Google response.scope
+            const grantedStr: string = response.scope || '';
             memoryGrantedScopes = new Set(grantedStr.split(' ').map((s) => s.trim()).filter(Boolean));
+
+            // Fail closed if requested scope is missing from granted scopes
+            if (scopeType === 'drive' && !memoryGrantedScopes.has(DRIVE_FILE_SCOPE)) {
+              this.disconnect();
+              const err = 'Google Drive permission was not granted. Please re-authorize and check the Google Drive permission box.';
+              currentSyncStatus = 'error';
+              this.notifyState(err);
+              return reject(new Error(err));
+            }
+            if (scopeType === 'youtube' && !memoryGrantedScopes.has(YOUTUBE_READONLY_SCOPE)) {
+              this.disconnect();
+              const err = 'YouTube permission was not granted. Please re-authorize and check the YouTube permission box.';
+              currentSyncStatus = 'error';
+              this.notifyState(err);
+              return reject(new Error(err));
+            }
 
             // expires_in is in seconds
             const expiresIn = Number(response.expires_in) || 3599;
             memoryTokenExpiresAt = Date.now() + expiresIn * 1000;
 
-            // Fetch profile info (in-memory only)
+            // Fetch profile info (in-memory only) - MUST fail closed if userinfo cannot be verified
             try {
               const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${memoryAccessToken}` }
               });
-              if (userInfoRes.ok) {
-                const info = await userInfoRes.json();
-                memoryProfile = {
-                  sub: info.sub || '',
-                  email: info.email || '',
-                  name: info.name || info.email || 'WWCF Worship Leader',
-                  picture: info.picture
-                };
-                if (typeof localStorage !== 'undefined') {
-                  if (memoryProfile.email) {
-                    localStorage.setItem(STORAGE_USER_EMAIL, memoryProfile.email);
-                  }
-                  if (memoryProfile.sub) {
-                    localStorage.setItem(STORAGE_USER_SUB, memoryProfile.sub);
-                  }
+              if (!userInfoRes.ok) {
+                throw new Error(`Profile identity verification failed (${userInfoRes.status})`);
+              }
+              const info = await userInfoRes.json();
+              memoryProfile = {
+                sub: info.sub || '',
+                email: info.email || '',
+                name: info.name || info.email || 'WWCF Worship Leader',
+                picture: info.picture
+              };
+              if (typeof localStorage !== 'undefined') {
+                if (memoryProfile.email) {
+                  localStorage.setItem(STORAGE_USER_EMAIL, memoryProfile.email);
+                }
+                if (memoryProfile.sub) {
+                  localStorage.setItem(STORAGE_USER_SUB, memoryProfile.sub);
                 }
               }
-            } catch (pErr) {
-              console.warn('Failed to fetch user profile:', pErr);
+            } catch (pErr: any) {
+              this.disconnect();
+              const msg = `Unable to verify Google user profile: ${pErr?.message || pErr}`;
+              currentSyncStatus = 'error';
+              this.notifyState(msg);
+              return reject(new Error(msg));
             }
 
             // Successfully connected - DO NOT auto-overwrite or auto-upload here!
@@ -519,6 +543,14 @@ export class GoogleAuthService {
         reject(new Error(msg));
       }
     });
+  }
+
+  /**
+   * Switches the active Google Account using GIS select_account prompt
+   */
+  static async switchAccount(scopeType: 'drive' | 'youtube' | 'all' = 'drive'): Promise<string> {
+    this.disconnect();
+    return this.requestToken('select_account', scopeType);
   }
 
   /**
@@ -551,23 +583,46 @@ export class GoogleAuthService {
   }
 
   /**
-   * Search for all backup files matching WWCF backup names in user's Drive, ordered by most recently modified first
+   * Search for all backup files matching WWCF backup names in user's Drive, ordered by most recently modified first.
+   * Includes bounded pagination (up to 5 pages) and deduplication by file ID.
    */
   static async searchDriveBackupFiles(token: string): Promise<DriveFileInfo[]> {
     const query = encodeURIComponent(`(name = '${BACKUP_FILENAME}' or name contains 'WWCF_Santa_Cruz_Worship_Ministry_Backup') and trashed = false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime,version,size,mimeType)&spaces=drive&orderBy=modifiedTime desc`;
+    let pageToken: string | null = null;
+    const allFiles: DriveFileInfo[] = [];
+    const seenIds = new Set<string>();
+    let pagesFetched = 0;
+    const MAX_PAGES = 5;
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    do {
+      let url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,modifiedTime,version,size,mimeType)&spaces=drive&orderBy=modifiedTime desc&pageSize=100`;
+      if (pageToken) {
+        url += `&pageToken=${encodeURIComponent(pageToken)}`;
+      }
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `Google Drive query failed (${res.status})`);
-    }
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    const data = await res.json();
-    return data.files || [];
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Google Drive query failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      const files: DriveFileInfo[] = data.files || [];
+      for (const f of files) {
+        if (f.id && !seenIds.has(f.id)) {
+          seenIds.add(f.id);
+          allFiles.push(f);
+        }
+      }
+
+      pageToken = data.nextPageToken || null;
+      pagesFetched++;
+    } while (pageToken && pagesFetched < MAX_PAGES);
+
+    return allFiles;
   }
 
   /**
@@ -603,6 +658,9 @@ export class GoogleAuthService {
     const schedules = StorageService.getSchedules();
     const songs = await SongService.getSongs();
     const songFamilies = await SongFamilyService.getSongFamilies();
+    const templates = TemplateService.getTemplatesSync();
+    const memberAvailability = AvailabilityService.getAvailabilityListSync();
+    const songFamiliarity = FamiliarityService.getFamiliarityListSync();
     const includeDraft = StorageService.getIncludeDraftInCloudBackup();
     const draftSchedule = includeDraft ? StorageService.getDraftSchedule() : null;
 
@@ -616,6 +674,9 @@ export class GoogleAuthService {
         schedules,
         labels,
         songFamilies,
+        templates,
+        memberAvailability,
+        songFamiliarity,
         ...(includeDraft && draftSchedule ? { draftSchedule } : {})
       }
     };
@@ -1020,10 +1081,39 @@ export class GoogleAuthService {
       }
 
       // Scenario 3: Target file identified
-      const targetFile =
-        (options?.fileId && files.find((f) => f.id === options.fileId)) ||
-        (this.getPersistedDriveFileId() && files.find((f) => f.id === this.getPersistedDriveFileId())) ||
-        files[0];
+      let targetFile: DriveFileInfo | undefined;
+      if (options?.fileId) {
+        targetFile = files.find((f) => f.id === options.fileId);
+        if (!targetFile) {
+          isSyncInProgress = false;
+          currentSyncStatus = 'error';
+          const msg = `Selected backup file (ID: ${options.fileId}) was not found in your Google Drive or was deleted/trashed.`;
+          this.notifyState(msg);
+          return { status: 'error', error: msg };
+        }
+      } else if (this.getPersistedDriveFileId()) {
+        const persistedId = this.getPersistedDriveFileId();
+        targetFile = files.find((f) => f.id === persistedId);
+        if (!targetFile) {
+          isSyncInProgress = false;
+          currentSyncStatus = 'conflict';
+          this.notifyState();
+          candidateListeners.forEach((l) => l(files));
+          return {
+            status: 'candidates_found',
+            candidates: files,
+            error: 'Previously selected backup file is no longer accessible. Please choose an existing backup file.'
+          };
+        }
+      } else if (files.length === 1) {
+        targetFile = files[0];
+      } else {
+        isSyncInProgress = false;
+        currentSyncStatus = 'conflict';
+        this.notifyState();
+        candidateListeners.forEach((l) => l(files));
+        return { status: 'candidates_found', candidates: files };
+      }
 
       // Read-before-write concurrency check
       const lastKnownModified = this.getRemoteModifiedTime();
@@ -1105,10 +1195,28 @@ export class GoogleAuthService {
         return { status: 'multiple_candidates', candidates: files };
       }
 
-      const targetFile =
-        (fileId && files.find((f) => f.id === fileId)) ||
-        (this.getPersistedDriveFileId() && files.find((f) => f.id === this.getPersistedDriveFileId())) ||
-        files[0];
+      let targetFile: DriveFileInfo | undefined;
+      if (fileId) {
+        targetFile = files.find((f) => f.id === fileId);
+        if (!targetFile) {
+          return {
+            status: 'error',
+            error: `Specified backup file (ID: ${fileId}) was not found in your Google Drive.`,
+            candidates: files
+          };
+        }
+      } else if (files.length === 1) {
+        targetFile = files[0];
+      } else if (this.getPersistedDriveFileId()) {
+        const persisted = files.find((f) => f.id === this.getPersistedDriveFileId());
+        if (persisted) {
+          targetFile = persisted;
+        } else {
+          return { status: 'multiple_candidates', candidates: files };
+        }
+      } else {
+        return { status: 'multiple_candidates', candidates: files };
+      }
 
       const remoteContent = await this.readDriveBackupContent(token, targetFile.id);
       const validation = BackupValidationService.validate(remoteContent);
@@ -1129,6 +1237,9 @@ export class GoogleAuthService {
         members: (data.members || []).length,
         families: (data.songFamilies || []).length,
         labels: (data.labels || []).length,
+        templates: (data.templates || []).length,
+        availability: (data.memberAvailability || []).length,
+        familiarity: (data.songFamiliarity || []).length,
         hasDraft: Boolean(data.draftSchedule)
       };
 
@@ -1207,6 +1318,9 @@ export class GoogleAuthService {
       schedules: StorageService.getSchedules(),
       songs: await SongService.getSongs(),
       families: await SongFamilyService.getSongFamilies(),
+      templates: TemplateService.getTemplatesSync(),
+      availability: AvailabilityService.getAvailabilityListSync(),
+      familiarity: FamiliarityService.getFamiliarityListSync(),
       draft: StorageService.getDraftSchedule()
     };
 
@@ -1215,6 +1329,9 @@ export class GoogleAuthService {
     let finalSchedules = envelope.hasSchedules && rawData.schedules !== undefined ? rawData.schedules : snapshot.schedules;
     let finalLabels = envelope.hasLabels && rawData.labels !== undefined ? rawData.labels : snapshot.labels;
     let finalFamilies = envelope.hasSongFamilies && rawData.songFamilies !== undefined ? rawData.songFamilies : snapshot.families;
+    let finalTemplates = envelope.hasTemplates && rawData.templates !== undefined ? rawData.templates : snapshot.templates;
+    let finalAvailability = envelope.hasMemberAvailability && rawData.memberAvailability !== undefined ? rawData.memberAvailability : snapshot.availability;
+    let finalFamiliarity = envelope.hasSongFamiliarity && rawData.songFamiliarity !== undefined ? rawData.songFamiliarity : snapshot.familiarity;
 
     if (mode === 'merge') {
       if (envelope.hasMembers && rawData.members) {
@@ -1247,18 +1364,41 @@ export class GoogleAuthService {
         );
         finalFamilies = [...snapshot.families, ...newItems];
       }
+
+      if (envelope.hasTemplates && rawData.templates) {
+        const existingKeys = new Set(snapshot.templates.map((t) => t.id || t.name.toLowerCase().trim()));
+        const newItems = rawData.templates.filter((t) => !existingKeys.has(t.id || t.name.toLowerCase().trim()));
+        finalTemplates = [...snapshot.templates, ...newItems];
+      }
+
+      if (envelope.hasMemberAvailability && rawData.memberAvailability) {
+        const availMergeKey = (a: MemberAvailability) => a.id || buildAvailabilityId(a.memberId, a.date, a.serviceType);
+        const existingKeys = new Set(snapshot.availability.map(availMergeKey));
+        const newItems = rawData.memberAvailability.filter((a) => !existingKeys.has(availMergeKey(a)));
+        finalAvailability = [...snapshot.availability, ...newItems];
+      }
+
+      if (envelope.hasSongFamiliarity && rawData.songFamiliarity) {
+        const existingKeys = new Set(snapshot.familiarity.map((f) => f.id || `${f.memberId}_${f.songId}`));
+        const newItems = rawData.songFamiliarity.filter((f) => !existingKeys.has(f.id || `${f.memberId}_${f.songId}`));
+        finalFamiliarity = [...snapshot.familiarity, ...newItems];
+      }
     }
 
     // Transactional commit with rollback
     try {
-      StorageService.saveMembers(finalMembers);
-      StorageService.saveLabels(finalLabels);
-      StorageService.saveSchedules(finalSchedules);
+      StorageService.saveMembersChecked(finalMembers);
+      StorageService.saveLabelsChecked(finalLabels);
+      StorageService.saveSchedulesChecked(finalSchedules);
       await SongService.saveSongsList(finalSongs);
       await SongFamilyService.saveSongFamilies(finalFamilies);
+      TemplateService.saveTemplatesSync(finalTemplates);
+      AvailabilityService.saveAvailabilityListSync(finalAvailability);
+      FamiliarityService.saveFamiliarityListSync(finalFamiliarity);
 
-      if (rawData.draftSchedule && StorageService.getIncludeDraftInCloudBackup()) {
-        StorageService.saveDraftSchedule(rawData.draftSchedule);
+      const acctKey = this.getAccountKey();
+      if (rawData.draftSchedule && StorageService.getIncludeDraftInCloudBackup(acctKey || undefined)) {
+        StorageService.saveDraftScheduleChecked(rawData.draftSchedule);
       }
 
       // Update sync metadata to match restored remote file using actual Drive file modified time
@@ -1273,12 +1413,15 @@ export class GoogleAuthService {
     } catch (writeErr) {
       // Safe Rollback to snapshot
       try {
-        StorageService.saveMembers(snapshot.members);
-        StorageService.saveLabels(snapshot.labels);
-        StorageService.saveSchedules(snapshot.schedules);
+        StorageService.saveMembersChecked(snapshot.members);
+        StorageService.saveLabelsChecked(snapshot.labels);
+        StorageService.saveSchedulesChecked(snapshot.schedules);
         await SongService.saveSongsList(snapshot.songs);
         await SongFamilyService.saveSongFamilies(snapshot.families);
-        StorageService.saveDraftSchedule(snapshot.draft);
+        TemplateService.saveTemplatesSync(snapshot.templates);
+        AvailabilityService.saveAvailabilityListSync(snapshot.availability);
+        FamiliarityService.saveFamiliarityListSync(snapshot.familiarity);
+        StorageService.saveDraftScheduleChecked(snapshot.draft);
       } catch (rollbackErr) {
         console.error('Critical rollback failure:', rollbackErr);
       }
@@ -1288,11 +1431,14 @@ export class GoogleAuthService {
 
   /**
    * Schedules a debounced background sync when local data changes,
-   * ONLY if the user has explicitly enabled Automatic Cloud Backup in Settings.
+   * ONLY if the user has explicitly enabled Automatic Cloud Backup in Settings
+   * for their currently connected account.
    */
   static triggerDebouncedAutoSync(): void {
     if (!this.isConnected()) return;
-    if (!StorageService.getAutoCloudSync()) return;
+    const accountKey = this.getAccountKey();
+    if (!accountKey) return;
+    if (!StorageService.getAutoCloudSync(accountKey)) return;
     if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
     autoSyncTimeout = setTimeout(() => {
       this.syncNow().catch((e) => console.warn('Debounced auto-sync error:', e));

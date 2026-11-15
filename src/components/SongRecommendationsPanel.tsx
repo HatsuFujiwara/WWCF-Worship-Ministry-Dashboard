@@ -30,11 +30,15 @@ import {
   GripVertical
 } from 'lucide-react';
 
+import { resolveSlotSong } from '../utils/songResolveUtils';
+
 interface SongRecommendationsPanelProps {
   allSongs: Song[];
   schedules: Schedule[];
   currentPraiseSongs: string[];
   currentWorshipSongs: string[];
+  currentPraiseSongIds?: string[];
+  currentWorshipSongIds?: string[];
   serviceDate?: string;
   serviceType?: string;
   onAddSong: (category: 'praise' | 'worship', songTitle: string, defaultKey?: string) => void;
@@ -46,6 +50,8 @@ export const SongRecommendationsPanel: React.FC<SongRecommendationsPanelProps> =
   schedules,
   currentPraiseSongs,
   currentWorshipSongs,
+  currentPraiseSongIds,
+  currentWorshipSongIds,
   serviceDate,
   serviceType,
   onAddSong,
@@ -70,7 +76,8 @@ export const SongRecommendationsPanel: React.FC<SongRecommendationsPanelProps> =
       searchQuery,
       referenceDate: serviceDate,
       targetServiceType: serviceType,
-      excludeLineupSongs: [...currentPraiseSongs, ...currentWorshipSongs]
+      excludeLineupSongs: [...currentPraiseSongs, ...currentWorshipSongs],
+      excludeLineupSongIds: [...(currentPraiseSongIds || []), ...(currentWorshipSongIds || [])]
     });
   }, [
     allSongs,
@@ -82,30 +89,61 @@ export const SongRecommendationsPanel: React.FC<SongRecommendationsPanelProps> =
     serviceDate,
     serviceType,
     currentPraiseSongs,
-    currentWorshipSongs
+    currentWorshipSongs,
+    currentPraiseSongIds,
+    currentWorshipSongIds
   ]);
 
-  // Sets of clean song titles currently in the active schedule draft
-  const activePraiseTitles = useMemo(() => {
-    return new Set(currentPraiseSongs.map((s) => s.trim().toLowerCase()).filter(Boolean));
-  }, [currentPraiseSongs]);
+  const activePraiseState = useMemo(() => {
+    const ids = new Set<string>();
+    const unmatchedTitles = new Set<string>();
+    currentPraiseSongs.forEach((t, idx) => {
+      const slotId = (currentPraiseSongIds?.[idx] || '').trim();
+      const clean = (t || '').trim();
+      if (slotId) {
+        ids.add(slotId);
+      } else if (clean) {
+        const resolved = resolveSlotSong(clean, undefined, allSongs);
+        if (resolved.song) ids.add(resolved.song.id);
+        else if (resolved.isUnmatched) unmatchedTitles.add(clean.toLowerCase());
+      }
+    });
+    return { ids, unmatchedTitles };
+  }, [currentPraiseSongs, currentPraiseSongIds, allSongs]);
 
-  const activeWorshipTitles = useMemo(() => {
-    return new Set(currentWorshipSongs.map((s) => s.trim().toLowerCase()).filter(Boolean));
-  }, [currentWorshipSongs]);
+  const activeWorshipState = useMemo(() => {
+    const ids = new Set<string>();
+    const unmatchedTitles = new Set<string>();
+    currentWorshipSongs.forEach((t, idx) => {
+      const slotId = (currentWorshipSongIds?.[idx] || '').trim();
+      const clean = (t || '').trim();
+      if (slotId) {
+        ids.add(slotId);
+      } else if (clean) {
+        const resolved = resolveSlotSong(clean, undefined, allSongs);
+        if (resolved.song) ids.add(resolved.song.id);
+        else if (resolved.isUnmatched) unmatchedTitles.add(clean.toLowerCase());
+      }
+    });
+    return { ids, unmatchedTitles };
+  }, [currentWorshipSongs, currentWorshipSongIds, allSongs]);
+
+  const isSongInSection = (song: Song, sectionState: { ids: Set<string>; unmatchedTitles: Set<string> }) => {
+    if (sectionState.ids.has(song.id)) return true;
+    const famTitles = SongService.getFamilySongTitles(song.title, allSongs, undefined, song.id);
+    return famTitles.some((t) => {
+      if (sectionState.unmatchedTitles.has(t)) return true;
+      const matches = allSongs.filter((s) => s.title.trim().toLowerCase() === t);
+      return matches.length === 1 && sectionState.ids.has(matches[0].id);
+    });
+  };
 
   // Filter out any songs already in the active lineup (Praise or Worship) or from the same Song Family
   const displayRecommendations = useMemo(() => {
     return recommendations.filter((item) => {
-      const cleanTitle = item.song.title.trim().toLowerCase();
-      const familyTitles = SongService.getFamilySongTitles(item.song.title, allSongs);
-      const inLineup =
-        activePraiseTitles.has(cleanTitle) ||
-        activeWorshipTitles.has(cleanTitle) ||
-        familyTitles.some((t) => activePraiseTitles.has(t) || activeWorshipTitles.has(t));
-      return !inLineup;
+      return !isSongInSection(item.song, activePraiseState) && !isSongInSection(item.song, activeWorshipState);
     });
-  }, [recommendations, allSongs, activePraiseTitles, activeWorshipTitles]);
+  }, [recommendations, allSongs, activePraiseState, activeWorshipState]);
 
   // Extract all unique themes present in songs for the theme filter dropdown
   const availableThemes = useMemo(() => {
@@ -376,10 +414,8 @@ export const SongRecommendationsPanel: React.FC<SongRecommendationsPanelProps> =
           ) : (
             displayRecommendations.slice(0, 15).map((item) => {
               const { song, badges, isSeasonal, timesUsed, lastPlayedFormatted, priorityGroup, isFamily, familyName } = item;
-              const cleanTitle = song.title.trim().toLowerCase();
-              const familyTitles = SongService.getFamilySongTitles(song.title, allSongs);
-              const inPraise = activePraiseTitles.has(cleanTitle) || familyTitles.some((t) => activePraiseTitles.has(t));
-              const inWorship = activeWorshipTitles.has(cleanTitle) || familyTitles.some((t) => activeWorshipTitles.has(t));
+              const inPraise = isSongInSection(song, activePraiseState);
+              const inWorship = isSongInSection(song, activeWorshipState);
 
               return (
                 <div

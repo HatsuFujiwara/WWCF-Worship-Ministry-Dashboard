@@ -16,13 +16,13 @@
   --surface-3: #ffffff;
   --surface-4: #e2e8f0;
 
-  /* Glassmorphic Surfaces (Light Mode) */
-  --glass-header: rgba(255, 255, 255, 0.88);
-  --glass-sidebar: rgba(255, 255, 255, 0.94);
-  --glass-card: rgba(255, 255, 255, 0.82);
-  --glass-modal: rgba(255, 255, 255, 0.97);
-  --glass-border: rgba(226, 232, 240, 0.85);
-  --glass-blur: 14px;
+  /* Clean, Service-Ready Surfaces (Light Mode) */
+  --glass-header: rgba(255, 255, 255, 0.96);
+  --glass-sidebar: #ffffff;
+  --glass-card: #ffffff;
+  --glass-modal: #ffffff;
+  --glass-border: rgba(226, 232, 240, 0.9);
+  --glass-blur: 8px;
 }
 
 /* AMOLED Dark Theme CSS Variable Overrides */
@@ -34,13 +34,13 @@
   --surface-3: #181818; /* Level 3: Floating / Modal Surface */
   --surface-4: #222222; /* Level 4: Active / Focus Surface */
 
-  /* Glassmorphic Surfaces (AMOLED Dark Mode) */
-  --glass-header: rgba(10, 10, 10, 0.82);
-  --glass-sidebar: rgba(10, 10, 10, 0.92);
-  --glass-card: rgba(14, 14, 14, 0.8);
-  --glass-modal: rgba(18, 18, 18, 0.95);
+  /* Clean, Service-Ready Surfaces (AMOLED Dark Mode) */
+  --glass-header: rgba(10, 10, 10, 0.92);
+  --glass-sidebar: #0A0A0A;
+  --glass-card: #0A0A0A;
+  --glass-modal: #121212;
   --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: 16px;
+  --glass-blur: 8px;
 
   /* Primary Background: Pure Black */
   --color-slate-950: #000000;
@@ -48,8 +48,12 @@
   /* Secondary Background (Cards, Dialogs, Modals, Header, Sidebar): #0A0A0A */
   --color-slate-900: #0A0A0A;
 
+  /* AMOLED Intermediate Surfaces */
+  --color-slate-850: #0e0e0e;
+
   /* Elevated Surfaces & Inputs: #111111 */
   --color-slate-800: #111111;
+  --color-slate-750: #161616;
 
   /* Subtle Borders & Dividers: #1F1F1F */
   --color-slate-700: #1F1F1F;
@@ -154,6 +158,9 @@ body.dark {
   --color-brand-900: #174366;
   --color-brand-950: #0f2b44;
 
+  --color-slate-850: #0e0e0e;
+  --color-slate-750: #161616;
+
   --color-indigo-50: #f0f7fc;
   --color-indigo-100: #dbeefa;
   --color-indigo-200: #bce0f5;
@@ -234,13 +241,22 @@ body.dark {
   box-shadow: 0 0 0 4px rgba(84, 176, 226, 0.6) !important;
 }
 
-/* Accessibility: Text Size scaling */
+/* Accessibility: Scalable Typography System */
+html {
+  font-size: 15px;
+}
+@media (min-width: 640px) {
+  html {
+    font-size: 16px;
+  }
+}
+
 html.text-size-large {
-  font-size: 17px;
+  font-size: 17.5px;
 }
 
 html.text-size-xl {
-  font-size: 18.5px;
+  font-size: 19px;
 }
 
 /* Accessibility: High Contrast Mode (Preserves AMOLED black aesthetic) */
@@ -651,14 +667,14 @@ html.density-spacious .space-y-4 > * + * {
 
 /* Redesigned Workspace Surface & Layout Utilities */
 .wwcf-surface-hero {
-  background: radial-gradient(120% 120% at 50% 0%, rgba(27, 117, 188, 0.08) 0%, rgba(10, 10, 10, 0.95) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  background-color: var(--surface-1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
 }
 :root:not(.dark) .wwcf-surface-hero {
-  background: radial-gradient(120% 120% at 50% 0%, rgba(27, 117, 188, 0.06) 0%, #ffffff 100%);
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.05);
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
 }
 
 .wwcf-panel-group {

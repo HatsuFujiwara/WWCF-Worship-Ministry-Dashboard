@@ -172,7 +172,7 @@ export const SONG_TAG_STYLES: Record<SongTagCategory, TagStyleDefinition> = {
  * Standard badge pill class applied to all song tags
  */
 export const BASE_SONG_TAG_CLASS =
-  'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors select-none';
+  'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold border transition-colors select-none';
 
 export function getSongTagClass(category: SongTagCategory, extraClasses = ''): string {
   const style = SONG_TAG_STYLES[category] || SONG_TAG_STYLES.never_played;

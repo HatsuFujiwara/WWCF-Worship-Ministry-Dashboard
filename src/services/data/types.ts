@@ -1,11 +1,10 @@
 import { Member, Schedule, MinistryAssignment } from '../../types';
 
-export type StorageProviderType = 'localStorage' | 'firebase' | 'supabase';
+export type StorageProviderType = 'localStorage';
 
 /**
  * Common Data Repository Interface.
- * Standardizes storage actions so switching to Firebase, Supabase, or REST backends
- * requires zero changes to UI components or application business logic.
+ * Standardizes local-first storage actions across the WWCF application.
  */
 export interface IDataRepository {
   /**

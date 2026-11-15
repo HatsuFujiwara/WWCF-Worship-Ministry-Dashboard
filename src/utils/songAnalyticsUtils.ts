@@ -1,6 +1,7 @@
 import { Member, Schedule, MinistryAssignment, getAssignmentMembers, Song, SongFamily } from '../types';
-import { isScheduleEmpty } from './scheduleUtils';
+import { isPopulatedSchedule } from './scheduleUtils';
 import { SongFamilyService } from '../services/songFamilyService';
+import { resolveSlotSong } from './songResolveUtils';
 
 /**
  * Checks if a member has the "Song Leader" tag.
@@ -177,10 +178,13 @@ export function getScheduleSongLeaders(
 }
 
 /**
- * Resolves the Song Family or canonical identity for a raw song title in a schedule.
+ * Resolves the Song Family or canonical identity for a raw song slot in a schedule.
+ * Strictly ID-authoritative: stale IDs are isolated under `stale_${cleanId}` and
+ * no-ID duplicate titles remain isolated under `ambiguous_${cleanLower}`.
  */
 function resolveSongIdentity(
   rawTitle: string,
+  songId: string | undefined,
   songs: Song[] = [],
   songFamilies: SongFamily[] = []
 ): {
@@ -190,45 +194,81 @@ function resolveSongIdentity(
   familyId?: string;
   actualTitle: string;
 } {
-  const cleanTitle = rawTitle.trim();
+  const cleanTitle = (rawTitle || '').trim();
   const cleanLower = cleanTitle.toLowerCase();
+  const cleanId = (songId || '').trim();
+  const resolved = resolveSlotSong(cleanTitle, cleanId, songs);
 
-  // 1. Check if title matches a song with a songFamilyId
-  const matchingSong = songs.find(
-    (s) => s.title.trim().toLowerCase() === cleanLower
-  );
+  if (resolved.isStaleId) {
+    const label = cleanTitle || 'Song unavailable';
+    return {
+      canonicalKey: `stale_${cleanId}`,
+      displayTitle: label,
+      isFamily: false,
+      actualTitle: label
+    };
+  }
 
-  if (matchingSong && matchingSong.songFamilyId) {
-    const fam = songFamilies.find((f) => f.id === matchingSong.songFamilyId);
+  if (resolved.song) {
+    const matched = resolved.song;
+    const fam =
+      (matched.songFamilyId
+        ? songFamilies.find((f) => f.id === matched.songFamilyId)
+        : undefined) ||
+      songFamilies.find(
+        (f) =>
+          (f.versionIds && f.versionIds.includes(matched.id)) ||
+          (f.versions && f.versions.some((v) => v.songId === matched.id))
+      );
+
     if (fam) {
       return {
         canonicalKey: `family_${fam.id}`,
         displayTitle: fam.name,
         isFamily: true,
         familyId: fam.id,
+        actualTitle: matched.title
+      };
+    }
+
+    return {
+      canonicalKey: `song_id_${matched.id}`,
+      displayTitle: matched.title,
+      isFamily: false,
+      actualTitle: matched.title
+    };
+  }
+
+  if (resolved.isAmbiguous) {
+    return {
+      canonicalKey: `ambiguous_${cleanLower}`,
+      displayTitle: cleanTitle,
+      isFamily: false,
+      actualTitle: cleanTitle
+    };
+  }
+
+  // Unlinked title (no ID, not matched to catalog): check unique Song Family name match
+  if (cleanLower) {
+    const directFams = songFamilies.filter(
+      (f) => f.name.trim().toLowerCase() === cleanLower
+    );
+    if (directFams.length === 1) {
+      const directFam = directFams[0];
+      return {
+        canonicalKey: `family_${directFam.id}`,
+        displayTitle: directFam.name,
+        isFamily: true,
+        familyId: directFam.id,
         actualTitle: cleanTitle
       };
     }
   }
 
-  // 2. Check if title directly matches a Song Family name
-  const directFam = songFamilies.find(
-    (f) => f.name.trim().toLowerCase() === cleanLower
-  );
-  if (directFam) {
-    return {
-      canonicalKey: `family_${directFam.id}`,
-      displayTitle: directFam.name,
-      isFamily: true,
-      familyId: directFam.id,
-      actualTitle: cleanTitle
-    };
-  }
-
-  // 3. Fallback: Standalone song
+  // Standalone unlinked song
   return {
-    canonicalKey: `song_${cleanLower}`,
-    displayTitle: matchingSong ? matchingSong.title : cleanTitle,
+    canonicalKey: `song_title_${cleanLower}`,
+    displayTitle: cleanTitle,
     isFamily: false,
     actualTitle: cleanTitle
   };
@@ -245,8 +285,8 @@ export function calculateSongAnalytics(
   songs: Song[] = [],
   songFamilies: SongFamily[] = []
 ): SongAnalyticsResult {
-  // 1. Filter saved lineups only (lineups with at least 1 song)
-  const savedSchedules = schedules.filter((s) => !isScheduleEmpty(s));
+  // 1. Filter populated saved lineups only (lineups with at least 1 song and NOT No Service)
+  const savedSchedules = schedules.filter((s) => isPopulatedSchedule(s));
 
   // Sort saved schedules chronologically descending (latest service date first) for recency
   const sortedSchedulesDesc = [...savedSchedules].sort((a, b) => {
@@ -332,12 +372,13 @@ export function calculateSongAnalytics(
   sortedSchedulesDesc.forEach((schedule) => {
     const { praiseLeaders, worshipLeaders } = getScheduleSongLeaders(schedule, members);
 
-    const praiseSongs = (schedule.praiseSongs || []).map((s) => s.trim()).filter(Boolean);
-    const worshipSongs = (schedule.worshipSongs || []).map((s) => s.trim()).filter(Boolean);
+    // Process Praise songs (preserving raw slot index alignment with praiseSongIds)
+    (schedule.praiseSongs || []).forEach((slotTitle, idx) => {
+      const rawTitle = (slotTitle || '').trim();
+      const slotId = schedule.praiseSongIds?.[idx];
+      if (!rawTitle && !(slotId && slotId.trim())) return;
 
-    // Process Praise songs
-    praiseSongs.forEach((rawTitle) => {
-      const identity = resolveSongIdentity(rawTitle, songs, songFamilies);
+      const identity = resolveSongIdentity(rawTitle, slotId, songs, songFamilies);
       let record = songUsageMap.get(identity.canonicalKey);
       if (!record) {
         record = {
@@ -353,12 +394,12 @@ export function calculateSongAnalytics(
       }
       record.totalCount += 1;
       record.versionCounts.set(
-        rawTitle,
-        (record.versionCounts.get(rawTitle) || 0) + 1
+        identity.actualTitle,
+        (record.versionCounts.get(identity.actualTitle) || 0) + 1
       );
       record.occurrences.push({
         schedule,
-        actualTitle: rawTitle,
+        actualTitle: identity.actualTitle,
         category: 'praise',
         leaders: praiseLeaders
       });
@@ -373,9 +414,13 @@ export function calculateSongAnalytics(
       });
     });
 
-    // Process Worship songs
-    worshipSongs.forEach((rawTitle) => {
-      const identity = resolveSongIdentity(rawTitle, songs, songFamilies);
+    // Process Worship songs (preserving raw slot index alignment with worshipSongIds)
+    (schedule.worshipSongs || []).forEach((slotTitle, idx) => {
+      const rawTitle = (slotTitle || '').trim();
+      const slotId = schedule.worshipSongIds?.[idx];
+      if (!rawTitle && !(slotId && slotId.trim())) return;
+
+      const identity = resolveSongIdentity(rawTitle, slotId, songs, songFamilies);
       let record = songUsageMap.get(identity.canonicalKey);
       if (!record) {
         record = {
@@ -391,12 +436,12 @@ export function calculateSongAnalytics(
       }
       record.totalCount += 1;
       record.versionCounts.set(
-        rawTitle,
-        (record.versionCounts.get(rawTitle) || 0) + 1
+        identity.actualTitle,
+        (record.versionCounts.get(identity.actualTitle) || 0) + 1
       );
       record.occurrences.push({
         schedule,
-        actualTitle: rawTitle,
+        actualTitle: identity.actualTitle,
         category: 'worship',
         leaders: worshipLeaders
       });

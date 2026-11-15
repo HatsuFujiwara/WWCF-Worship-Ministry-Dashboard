@@ -2,6 +2,8 @@ import { Song, Schedule, SongFamily } from '../types';
 import { formatDateDisplayManila, getManilaTodayString } from './dateUtils';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
+import { isNoServiceSchedule } from './scheduleUtils';
+import { resolveSlotSong } from './songResolveUtils';
 
 export interface RecommendedSong {
   song: Song;
@@ -77,21 +79,77 @@ export function isSongProhibitedByDateRules(
   schedules: Schedule[],
   targetServiceType?: string,
   allSongs?: Song[],
-  allFamilies?: SongFamily[]
+  allFamilies?: SongFamily[],
+  songId?: string
 ): boolean {
   const cleanTitle = songTitle.trim().toLowerCase();
-  if (!cleanTitle || !referenceDateStr || schedules.length === 0) return false;
+  const cleanId = (songId || '').trim();
+  if ((!cleanTitle && !cleanId) || !referenceDateStr || schedules.length === 0) return false;
 
-  const familyTitles = new Set(SongService.getFamilySongTitles(songTitle, allSongs, allFamilies));
+  const songs = allSongs || [];
+  const familyTitles = new Set(SongService.getFamilySongTitles(songTitle, songs, allFamilies, cleanId || undefined));
   const familyIds = new Set<string>();
 
-  if (allSongs && allSongs.length > 0) {
-    allSongs.forEach((s) => {
-      if (familyTitles.has(s.title.trim().toLowerCase())) {
-        familyIds.add(s.id);
+  if (cleanId) {
+    familyIds.add(cleanId);
+    const matchedSong = songs.find((s) => s.id === cleanId);
+    if (matchedSong) {
+      const fam = SongFamilyService.findFamilyForSong(matchedSong, allFamilies || SongFamilyService.getSongFamiliesSync(), songs);
+      if (fam) {
+        (fam.versionIds || []).forEach((id) => familyIds.add(id));
+        (fam.versions || []).forEach((v) => familyIds.add(v.songId));
+        songs.forEach((s) => {
+          if (s.songFamilyId === fam.id || familyIds.has(s.id)) {
+            familyIds.add(s.id);
+          }
+        });
       }
-    });
+    }
+  } else if (songs.length > 0 && cleanTitle) {
+    const exactMatches = songs.filter((s) => s.title.trim().toLowerCase() === cleanTitle);
+    if (exactMatches.length === 1) {
+      const matched = exactMatches[0];
+      familyIds.add(matched.id);
+      const fam = SongFamilyService.findFamilyForSong(matched, allFamilies || SongFamilyService.getSongFamiliesSync(), songs);
+      if (fam) {
+        (fam.versionIds || []).forEach((id) => familyIds.add(id));
+        (fam.versions || []).forEach((v) => familyIds.add(v.songId));
+        songs.forEach((s) => {
+          if (s.songFamilyId === fam.id || familyIds.has(s.id)) {
+            familyIds.add(s.id);
+          }
+        });
+      }
+    } else if (exactMatches.length > 1) {
+      // Duplicate catalog titles with no songId remain ambiguous
+      return false;
+    }
   }
+
+  const slotSectionMatches = (titles: string[] = [], ids: string[] = []): boolean => {
+    const len = Math.max(titles.length, ids.length);
+    for (let idx = 0; idx < len; idx++) {
+      const slotId = (ids[idx] || '').trim();
+      const slotTitle = (titles[idx] || '').trim();
+      if (slotId) {
+        if (familyIds.has(slotId)) return true;
+        continue;
+      }
+      if (!slotTitle) continue;
+      if (songs.length > 0) {
+        const resolved = resolveSlotSong(slotTitle, undefined, songs);
+        if (resolved.isAmbiguous) continue;
+        if (resolved.song) {
+          if (familyIds.has(resolved.song.id)) return true;
+          continue;
+        }
+      }
+      if (!cleanId && familyIds.size === 0 && familyTitles.has(slotTitle.toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   const refYM = referenceDateStr.slice(0, 7);
   const inFirstWeek = isFirstWeekOfMonth(referenceDateStr);
@@ -99,13 +157,11 @@ export function isSongProhibitedByDateRules(
   const isTargetRegular = !isSpecialEvent(targetServiceType);
 
   for (const sch of schedules) {
-    if (!sch.serviceDate) continue;
+    if (isNoServiceSchedule(sch) || !sch.serviceDate) continue;
 
-    // Check if sch contains this song or any version of its family by title or song ID
-    const inPraise = (sch.praiseSongs || []).some((s) => familyTitles.has(s.trim().toLowerCase())) ||
-                     (sch.praiseSongIds || []).some((id) => familyIds.has(id));
-    const inWorship = (sch.worshipSongs || []).some((s) => familyTitles.has(s.trim().toLowerCase())) ||
-                      (sch.worshipSongIds || []).some((id) => familyIds.has(id));
+    // Check if sch contains this song or any version of its family by slot ID (or unique title when un-ID'd)
+    const inPraise = slotSectionMatches(sch.praiseSongs || [], sch.praiseSongIds || []);
+    const inWorship = slotSectionMatches(sch.worshipSongs || [], sch.worshipSongIds || []);
     if (!inPraise && !inWorship) continue;
 
     // Special event exception: If recommending for regular service, ignore special events
@@ -150,7 +206,8 @@ export function isEffectivelyRecentlyPlayed(
     schedules,
     targetServiceType,
     allSongs,
-    allFamilies
+    allFamilies,
+    song.id
   );
 }
 
@@ -262,6 +319,7 @@ export function getSmartSongRecommendations(
     targetServiceType?: string;
     allFamilies?: SongFamily[];
     excludeLineupSongs?: string[];
+    excludeLineupSongIds?: (string | undefined)[];
   }
 ): RecommendedSong[] {
   let refDateStr = getManilaTodayString();
@@ -291,13 +349,22 @@ export function getSmartSongRecommendations(
 
   // 2. Build fast lookup maps
   const songByIdMap = new Map<string, Song>();
-  const songByTitleMap = new Map<string, Song>();
+  const titleCounts = new Map<string, number>();
+  const uniqueSongByTitleMap = new Map<string, Song>();
   const songIdToFamilyMap = new Map<string, SongFamily>();
-  const songTitleToFamilyMap = new Map<string, SongFamily>();
+  const uniqueTitleToFamilyMap = new Map<string, SongFamily>();
+  const familyNameToFamilyMap = new Map<string, SongFamily>();
 
   for (const song of allSongs) {
     songByIdMap.set(song.id, song);
-    songByTitleMap.set(song.title.trim().toLowerCase(), song);
+    const clean = song.title.trim().toLowerCase();
+    titleCounts.set(clean, (titleCounts.get(clean) || 0) + 1);
+  }
+  for (const song of allSongs) {
+    const clean = song.title.trim().toLowerCase();
+    if (titleCounts.get(clean) === 1) {
+      uniqueSongByTitleMap.set(clean, song);
+    }
   }
 
   for (const fam of families) {
@@ -306,7 +373,10 @@ export function getSmartSongRecommendations(
         songIdToFamilyMap.set(vId, fam);
         const s = songByIdMap.get(vId);
         if (s) {
-          songTitleToFamilyMap.set(s.title.trim().toLowerCase(), fam);
+          const clean = s.title.trim().toLowerCase();
+          if (titleCounts.get(clean) === 1) {
+            uniqueTitleToFamilyMap.set(clean, fam);
+          }
         }
       }
     }
@@ -315,12 +385,15 @@ export function getSmartSongRecommendations(
         songIdToFamilyMap.set(v.songId, fam);
         const s = songByIdMap.get(v.songId);
         if (s) {
-          songTitleToFamilyMap.set(s.title.trim().toLowerCase(), fam);
+          const clean = s.title.trim().toLowerCase();
+          if (titleCounts.get(clean) === 1) {
+            uniqueTitleToFamilyMap.set(clean, fam);
+          }
         }
       }
     }
     if (fam.name) {
-      songTitleToFamilyMap.set(fam.name.trim().toLowerCase(), fam);
+      familyNameToFamilyMap.set(fam.name.trim().toLowerCase(), fam);
     }
   }
 
@@ -329,7 +402,10 @@ export function getSmartSongRecommendations(
       const fam = families.find((f) => f.id === song.songFamilyId);
       if (fam) {
         songIdToFamilyMap.set(song.id, fam);
-        songTitleToFamilyMap.set(song.title.trim().toLowerCase(), fam);
+        const clean = song.title.trim().toLowerCase();
+        if (titleCounts.get(clean) === 1) {
+          uniqueTitleToFamilyMap.set(clean, fam);
+        }
       }
     }
   }
@@ -340,12 +416,31 @@ export function getSmartSongRecommendations(
   const prevWeekRange = inFirstWeek ? getLastWeekOfPreviousMonthRange(refDateStr) : null;
   const isTargetRegular = !isSpecialEvent(options?.targetServiceType);
 
-  const prohibitedScheduleTitles = new Set<string>();
+  const prohibitedUnmatchedTitles = new Set<string>();
   const prohibitedSongIds = new Set<string>();
   const prohibitedFamilyIds = new Set<string>();
 
+  const recordSlotProhibition = (titles: string[] = [], ids: string[] = []) => {
+    const len = Math.max(titles.length, ids.length);
+    for (let idx = 0; idx < len; idx++) {
+      const slotId = (ids[idx] || '').trim();
+      const slotTitle = (titles[idx] || '').trim();
+      if (slotId) {
+        prohibitedSongIds.add(slotId);
+        continue;
+      }
+      if (!slotTitle) continue;
+      const resolved = resolveSlotSong(slotTitle, undefined, allSongs);
+      if (resolved.song) {
+        prohibitedSongIds.add(resolved.song.id);
+      } else if (resolved.isUnmatched) {
+        prohibitedUnmatchedTitles.add(slotTitle.toLowerCase());
+      }
+    }
+  };
+
   for (const sch of schedules) {
-    if (!sch.serviceDate) continue;
+    if (isNoServiceSchedule(sch) || !sch.serviceDate) continue;
     if (isTargetRegular && isSpecialEvent(sch.serviceType)) {
       continue;
     }
@@ -368,40 +463,21 @@ export function getSmartSongRecommendations(
     }
 
     if (isRecent) {
-      const titles = [...(sch.praiseSongs || []), ...(sch.worshipSongs || [])];
-      const ids = [...(sch.praiseSongIds || []), ...(sch.worshipSongIds || [])];
-
-      for (const t of titles) {
-        const clean = t.trim().toLowerCase();
-        if (clean) prohibitedScheduleTitles.add(clean);
-      }
-      for (const id of ids) {
-        if (id && id.trim()) prohibitedSongIds.add(id.trim());
-      }
+      recordSlotProhibition(sch.praiseSongs || [], sch.praiseSongIds || []);
+      recordSlotProhibition(sch.worshipSongs || [], sch.worshipSongIds || []);
     }
   }
 
   // Strictly prohibit all songs currently in the active schedule lineup (Praise & Worship)
   if (options?.excludeLineupSongs && options.excludeLineupSongs.length > 0) {
-    for (const songTitle of options.excludeLineupSongs) {
-      const clean = (songTitle || '').trim().toLowerCase();
-      if (clean) {
-        prohibitedScheduleTitles.add(clean);
-        // Also match against allSongs to find their IDs
-        const matched = allSongs.find((s) => s.title.trim().toLowerCase() === clean);
-        if (matched) {
-          prohibitedSongIds.add(matched.id);
-          if (matched.songFamilyId) {
-            prohibitedFamilyIds.add(matched.songFamilyId);
-          }
-        }
-      }
-    }
+    recordSlotProhibition(options.excludeLineupSongs, options.excludeLineupSongIds || []);
+  } else if (options?.excludeLineupSongIds && options.excludeLineupSongIds.length > 0) {
+    recordSlotProhibition([], options.excludeLineupSongIds);
   }
 
-  // Map recently used titles and IDs to Song Families
-  for (const title of prohibitedScheduleTitles) {
-    const fam = songTitleToFamilyMap.get(title);
+  // Map recently used unmatched family titles and IDs to Song Families
+  for (const title of prohibitedUnmatchedTitles) {
+    const fam = uniqueTitleToFamilyMap.get(title) || familyNameToFamilyMap.get(title);
     if (fam) {
       prohibitedFamilyIds.add(fam.id);
     }
@@ -426,11 +502,7 @@ export function getSmartSongRecommendations(
       for (const song of allSongs) {
         if (song.songFamilyId === famId || (fam.versionIds && fam.versionIds.includes(song.id))) {
           prohibitedSongIds.add(song.id);
-          prohibitedScheduleTitles.add(song.title.trim().toLowerCase());
         }
-      }
-      if (fam.name) {
-        prohibitedScheduleTitles.add(fam.name.trim().toLowerCase());
       }
     }
   }
@@ -439,16 +511,14 @@ export function getSmartSongRecommendations(
   const eligibleCandidates: Song[] = [];
 
   for (const song of allSongs) {
-    const cleanTitle = song.title.trim().toLowerCase();
     if (prohibitedSongIds.has(song.id)) continue;
-    if (prohibitedScheduleTitles.has(cleanTitle)) continue;
 
     if (song.songFamilyId && prohibitedFamilyIds.has(song.songFamilyId)) continue;
-    const fam = songIdToFamilyMap.get(song.id) || songTitleToFamilyMap.get(cleanTitle);
+    const fam = songIdToFamilyMap.get(song.id);
     if (fam && prohibitedFamilyIds.has(fam.id)) continue;
 
     // Defensive check with isSongProhibitedByDateRules
-    if (isSongProhibitedByDateRules(song.title, refDateStr, schedules, options?.targetServiceType, allSongs, families)) {
+    if (isSongProhibitedByDateRules(song.title, refDateStr, schedules, options?.targetServiceType, allSongs, families, song.id)) {
       continue;
     }
 
@@ -460,7 +530,7 @@ export function getSmartSongRecommendations(
   const familyCandidateGroups = new Map<string, Song[]>();
 
   for (const song of eligibleCandidates) {
-    const fam = songIdToFamilyMap.get(song.id) || songTitleToFamilyMap.get(song.title.trim().toLowerCase());
+    const fam = songIdToFamilyMap.get(song.id);
     if (fam) {
       const group = familyCandidateGroups.get(fam.id) || [];
       group.push(song);

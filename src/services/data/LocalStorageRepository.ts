@@ -16,10 +16,17 @@ export class LocalStorageRepository implements IDataRepository {
   async getMembers(): Promise<Member[]> {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.MEMBERS);
-      const raw: Member[] = data ? JSON.parse(data) : DEFAULT_MEMBERS;
+      if (data === null) {
+        return sanitizeMembers(DEFAULT_MEMBERS);
+      }
+      const raw: Member[] = JSON.parse(data);
+      if (!Array.isArray(raw)) {
+        throw new Error('Stored members payload is not an array');
+      }
       return sanitizeMembers(raw);
-    } catch {
-      return sanitizeMembers(DEFAULT_MEMBERS);
+    } catch (e) {
+      console.error('[LocalStorageRepository] Failed to read members:', e);
+      return [];
     }
   }
 
@@ -29,15 +36,23 @@ export class LocalStorageRepository implements IDataRepository {
       localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(sanitized));
     } catch (e) {
       console.error('[LocalStorageRepository] Failed to save members:', e);
+      throw e;
     }
   }
 
   async getLabels(): Promise<string[]> {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.LABELS);
-      const raw: string[] = data ? JSON.parse(data) : DEFAULT_LABELS;
+      if (data === null) {
+        return sanitizeLabels(DEFAULT_LABELS);
+      }
+      const raw: string[] = JSON.parse(data);
+      if (!Array.isArray(raw)) {
+        throw new Error('Stored labels payload is not an array');
+      }
       return sanitizeLabels(raw);
-    } catch {
+    } catch (e) {
+      console.error('[LocalStorageRepository] Failed to read labels:', e);
       return sanitizeLabels(DEFAULT_LABELS);
     }
   }
@@ -48,16 +63,24 @@ export class LocalStorageRepository implements IDataRepository {
       localStorage.setItem(STORAGE_KEYS.LABELS, JSON.stringify(sanitized));
     } catch (e) {
       console.error('[LocalStorageRepository] Failed to save labels:', e);
+      throw e;
     }
   }
 
   async getSchedules(): Promise<Schedule[]> {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
-      const raw: Schedule[] = data ? JSON.parse(data) : DEFAULT_SCHEDULES;
+      if (data === null) {
+        return sanitizeSchedules(DEFAULT_SCHEDULES);
+      }
+      const raw: Schedule[] = JSON.parse(data);
+      if (!Array.isArray(raw)) {
+        throw new Error('Stored schedules payload is not an array');
+      }
       return sanitizeSchedules(raw);
-    } catch {
-      return sanitizeSchedules(DEFAULT_SCHEDULES);
+    } catch (e) {
+      console.error('[LocalStorageRepository] Failed to read schedules:', e);
+      return [];
     }
   }
 
@@ -67,6 +90,7 @@ export class LocalStorageRepository implements IDataRepository {
       localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(sanitized));
     } catch (e) {
       console.error('[LocalStorageRepository] Failed to save schedules:', e);
+      throw e;
     }
   }
 
@@ -84,6 +108,7 @@ export class LocalStorageRepository implements IDataRepository {
       localStorage.setItem(STORAGE_KEYS.DARK_MODE, JSON.stringify(isDark));
     } catch (e) {
       console.error('[LocalStorageRepository] Failed to save dark mode:', e);
+      throw e;
     }
   }
 
@@ -109,6 +134,7 @@ export class LocalStorageRepository implements IDataRepository {
       }
     } catch (e) {
       console.error('[LocalStorageRepository] Failed to save draft:', e);
+      throw e;
     }
   }
 }

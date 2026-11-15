@@ -766,7 +766,7 @@ export class YouTubePlaylistService {
             key: '',
             originalKey: '',
             versionType: detectedVer.versionType,
-            duration: item.duration || '3:45',
+            duration: item.duration || '',
             youtubeUrl: item.youtubeUrl,
             youtubeId: item.videoId,
             thumbnailUrl: item.thumbnailUrl,
