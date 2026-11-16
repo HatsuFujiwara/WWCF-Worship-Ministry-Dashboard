@@ -30,7 +30,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
 
   const imageElement = (
     <img
-      src="/assets/WWCF_Santa_Cruz_Logo_1b75bc.png"
+      src="/assets/wwcf-square-logo-blue.png"
       alt="Word for the World Christian Fellowship - Santa Cruz"
       className={`${sizeClasses[size]} object-contain shrink-0 rounded-lg select-none`}
       loading="eager"
