@@ -115,19 +115,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* TOP BAR: Header / Toggle Actions                                         */}
         {/* ========================================================================= */}
         <div
-          className={`h-14 border-b border-slate-200/70 dark:border-white/10 shrink-0 flex items-center ${
-            isCollapsedOnDesktop ? 'px-2 lg:px-0 lg:justify-center justify-between' : 'px-3 justify-between'
+          className={`min-h-[92px] py-2 border-b border-slate-200/70 dark:border-white/10 shrink-0 flex items-center ${
+            isCollapsedOnDesktop
+              ? 'pl-2.5 pr-2 justify-between gap-1.5 lg:flex-col lg:justify-center lg:px-0 lg:gap-1.5'
+              : 'pl-2.5 pr-2 justify-between gap-1.5'
           }`}
         >
           {/* Brand logo for expanded desktop and mobile drawer */}
           <div
-            className={`items-center gap-2 min-w-0 ${
+            className={`items-center gap-2 min-w-0 flex-1 ${
               isCollapsedOnDesktop ? 'flex lg:hidden' : 'flex'
             }`}
           >
             <BrandLogo
               collapsed={false}
-              size="sm"
+              size="xl"
               onClick={() => {
                 setActiveTab('dashboard');
                 if (window.innerWidth < 1024) setIsOpen(false);
@@ -137,10 +139,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Collapsed desktop icon logo */}
           {isCollapsedOnDesktop && (
-            <div className="hidden lg:flex items-center justify-center">
+            <div className="hidden lg:flex items-center justify-center shrink-0">
               <BrandLogo
                 collapsed={true}
-                size="sm"
+                size="md"
                 onClick={() => {
                   setActiveTab('dashboard');
                 }}
@@ -148,7 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             {/* Desktop Collapse / Expand toggle button */}
             {onToggleCollapse && (
               <button
