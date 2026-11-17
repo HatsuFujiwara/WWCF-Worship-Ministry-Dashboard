@@ -114,7 +114,7 @@ export const TextToSpeechNavigator: React.FC<TextToSpeechNavigatorProps> = ({
     const items: string[] = [];
 
     if (activeTab === 'dashboard') {
-      items.push('WWCF Santa Cruz Worship Ministry. Dashboard Overview.');
+      items.push('WWCF Worship Song Line-up Scheduler. Dashboard Overview.');
       if (schedule) {
         items.push(`Upcoming service date: ${schedule.serviceDate}. Service Type: ${schedule.serviceType}.`);
         const leaderAss = schedule.ministryAssignments?.find((a) =>

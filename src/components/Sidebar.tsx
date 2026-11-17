@@ -15,7 +15,9 @@ import {
   PanelRightOpen,
   Database,
   QrCode,
-  BarChart3
+  BarChart3,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
 
@@ -23,6 +25,35 @@ export interface NavigationItem {
   id: ActiveTab;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+}
+
+export const SIDEBAR_LAYOUT_TOKENS = {
+  mobileWidthClass: 'w-[min(272px,88vw)]',
+  expandedDesktopWidthClass: 'lg:w-[240px]',
+  collapsedDesktopWidthClass: 'lg:w-[96px]',
+  mainContentOffsetClasses: {
+    expanded: {
+      left: 'lg:pl-[240px]',
+      right: 'lg:pr-[240px]'
+    },
+    collapsed: {
+      left: 'lg:pl-[96px]',
+      right: 'lg:pr-[96px]'
+    },
+    hidden: ''
+  }
+} as const;
+
+export function getMainContentOffsetClass(options: {
+  navigationOrientation: NavigationOrientation;
+  sidebarPosition: SidebarPosition;
+  sidebarVisibility: SidebarVisibility;
+}): string {
+  if (options.navigationOrientation === 'horizontal' || options.sidebarVisibility === 'hidden') {
+    return SIDEBAR_LAYOUT_TOKENS.mainContentOffsetClasses.hidden;
+  }
+  const mode = options.sidebarVisibility === 'collapsed' ? 'collapsed' : 'expanded';
+  return SIDEBAR_LAYOUT_TOKENS.mainContentOffsetClasses[mode][options.sidebarPosition];
 }
 
 export const MAIN_NAVIGATION_ITEMS: NavigationItem[] = [
@@ -55,6 +86,8 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
+  isDarkMode,
+  setIsDarkMode,
   isOpen,
   setIsOpen,
   onOpenBackupRestore,
@@ -71,8 +104,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isHiddenOnDesktop = isHorizontal || sidebarVisibility === 'hidden';
   const isCollapsedOnDesktop = !isHorizontal && sidebarVisibility === 'collapsed';
 
-  // Desktop width: narrow 54px icon rail when collapsed, 260px workspace panel when expanded
-  const widthClass = isCollapsedOnDesktop ? 'w-[280px] lg:w-[54px]' : 'w-[280px] lg:w-[260px]';
+  // Responsive mobile drawer: min(272px, 88vw); Desktop: 96px icon rail when collapsed (fits 76x76 logo), 240px when expanded
+  const widthClass = isCollapsedOnDesktop
+    ? `${SIDEBAR_LAYOUT_TOKENS.mobileWidthClass} ${SIDEBAR_LAYOUT_TOKENS.collapsedDesktopWidthClass}`
+    : `${SIDEBAR_LAYOUT_TOKENS.mobileWidthClass} ${SIDEBAR_LAYOUT_TOKENS.expandedDesktopWidthClass}`;
 
   // Desktop transform:
   // If hidden on desktop, push off-screen. If collapsed or expanded, position flush (translate-x-0).
@@ -109,21 +144,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         aria-label="Main Navigation"
-        className={`fixed top-0 bottom-0 z-50 ${widthClass} wwcf-glass-sidebar text-slate-700 dark:text-slate-300 flex flex-col transition-all duration-200 ease-in-out ${positionClass} ${mobileTranslateClass} ${desktopTranslateClass} select-none`}
+        data-sidebar-shell="true"
+        className={`fixed top-0 bottom-0 z-50 ${widthClass} overflow-x-hidden wwcf-glass-sidebar text-slate-700 dark:text-slate-300 flex flex-col transition-[width,transform] duration-200 ease-out motion-reduce:transition-none ${positionClass} ${mobileTranslateClass} ${desktopTranslateClass} select-none`}
       >
         {/* ========================================================================= */}
-        {/* TOP BAR: Header / Toggle Actions                                         */}
+        {/* TOP BAR: Brand Anchor & Collapse/Close Control                           */}
         {/* ========================================================================= */}
         <div
-          className={`min-h-[92px] py-2 border-b border-slate-200/70 dark:border-white/10 shrink-0 flex items-center ${
+          className={`min-h-[92px] border-b border-slate-200/80 dark:border-white/10 shrink-0 flex items-center justify-between px-3.5 py-2.5 gap-2 ${
             isCollapsedOnDesktop
-              ? 'pl-2.5 pr-2 justify-between gap-1.5 lg:flex-col lg:justify-center lg:px-0 lg:gap-1.5'
-              : 'pl-2.5 pr-2 justify-between gap-1.5'
+              ? 'lg:flex-col lg:justify-center lg:px-2 lg:py-3 lg:gap-2'
+              : ''
           }`}
         >
           {/* Brand logo for expanded desktop and mobile drawer */}
           <div
-            className={`items-center gap-2 min-w-0 flex-1 ${
+            className={`items-center shrink-0 ${
               isCollapsedOnDesktop ? 'flex lg:hidden' : 'flex'
             }`}
           >
@@ -142,7 +178,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="hidden lg:flex items-center justify-center shrink-0">
               <BrandLogo
                 collapsed={true}
-                size="md"
+                size="xl"
                 onClick={() => {
                   setActiveTab('dashboard');
                 }}
@@ -174,7 +210,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? 'Collapse to icon rail (right)'
                     : 'Collapse to icon rail (left)'
                 }
-                className="hidden lg:flex items-center justify-center w-8 h-8 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+                className="hidden lg:flex items-center justify-center w-8 h-8 text-slate-400 hover:text-slate-700 dark:hover:text-slate-100 rounded-xl border border-transparent hover:border-slate-200/80 dark:hover:border-white/10 hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
               >
                 {isCollapsedOnDesktop ? (
                   isRight ? (
@@ -194,7 +230,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="lg:hidden p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              className="lg:hidden flex items-center justify-center w-9 h-9 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 rounded-xl border border-slate-200/70 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
               aria-label="Close navigation"
               title="Close navigation"
             >
@@ -209,10 +245,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <nav
           aria-label="Primary Navigation"
           data-tour="sidebar-nav"
-          className={`flex-1 py-3 overflow-y-auto space-y-1 ${
-            isCollapsedOnDesktop ? 'px-3 lg:px-1.5 lg:flex lg:flex-col lg:items-center' : 'px-3'
+          className={`flex-1 py-3.5 overflow-y-auto space-y-1 ${
+            isCollapsedOnDesktop ? 'px-3 lg:px-2 lg:flex lg:flex-col lg:items-center' : 'px-3'
           }`}
         >
+          <p
+            className={`px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 ${
+              isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
+            }`}
+          >
+            Workspace
+          </p>
+
           {MAIN_NAVIGATION_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -231,50 +275,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 aria-current={isActive ? 'page' : undefined}
                 className={`relative group transition-all duration-150 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   isCollapsedOnDesktop
-                    ? 'w-full lg:w-10 lg:h-10 px-3 lg:px-0 py-2.5 lg:py-0 rounded-xl flex items-center justify-between lg:justify-center'
-                    : 'w-full px-3 py-2.5 rounded-xl flex items-center justify-between'
+                    ? 'w-full lg:w-11 lg:h-11 px-3 lg:px-0 min-h-[42px] lg:min-h-0 rounded-xl flex items-center justify-start lg:justify-center'
+                    : 'w-full px-3 min-h-[42px] py-2 rounded-xl flex items-center justify-start'
                 } ${
                   isActive
-                    ? 'bg-[#1b75bc]/12 dark:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/5 font-medium'
+                    ? isCollapsedOnDesktop
+                      ? 'bg-[#f0f7fc] dark:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] font-semibold lg:ring-1 lg:ring-[#1b75bc]/30 dark:lg:ring-[#54b0e2]/35'
+                      : 'bg-[#f0f7fc] dark:bg-[#1b75bc]/15 text-[#165d97] dark:text-[#7ac2eb] font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/[0.05] font-medium'
                 }`}
               >
+                {/* Single restrained active bar on expanded / mobile drawer */}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-[#1b75bc] dark:bg-[#54b0e2] ${
+                      isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
+                    }`}
+                  />
+                )}
+
                 <div
                   className={`flex items-center min-w-0 ${
                     isCollapsedOnDesktop ? 'gap-3 lg:gap-0' : 'gap-3'
                   }`}
                 >
-                  <div
-                    className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+                  <Icon
+                    className={`w-[18px] h-[18px] shrink-0 transition-colors ${
                       isActive
-                        ? 'bg-[#1b75bc] text-white shadow-xs'
+                        ? 'text-[#1b75bc] dark:text-[#54b0e2]'
                         : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300'
                     }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                  </div>
+                  />
 
                   {/* Label: hidden on desktop when collapsed into rail */}
                   <span
-                    className={`truncate text-sm ${
+                    className={`truncate text-[13.5px] leading-tight ${
                       isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
                     }`}
                   >
                     {item.label}
                   </span>
                 </div>
-
-                {/* Active indicator dot / pill */}
-                {isActive && (
-                  <span
-                    className={`shrink-0 rounded-full bg-[#1b75bc] dark:bg-[#54b0e2] ${
-                      isCollapsedOnDesktop
-                        ? 'w-1.5 h-4 lg:w-1 lg:h-3 block lg:absolute ' +
-                          (isRight ? 'lg:-left-1 lg:top-1/2 lg:-translate-y-1/2' : 'lg:-right-1 lg:top-1/2 lg:-translate-y-1/2')
-                        : 'w-1.5 h-4 block'
-                    }`}
-                  />
-                )}
               </button>
             );
           })}
@@ -284,9 +326,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* FOOTER UTILITY ACTIONS                                                   */}
         {/* ========================================================================= */}
         <div
-          className={`border-t border-slate-200/70 dark:border-white/10 shrink-0 space-y-1 ${
+          className={`border-t border-slate-200/80 dark:border-white/10 shrink-0 space-y-0.5 ${
             isCollapsedOnDesktop
-              ? 'p-3 lg:p-1.5 lg:flex lg:flex-col lg:items-center'
+              ? 'p-3 lg:p-2 lg:flex lg:flex-col lg:items-center lg:gap-1'
               : 'p-3'
           }`}
         >
@@ -300,10 +342,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
             title="Help & User Guide (F1)"
             aria-label="Help & User Guide (F1)"
-            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-slate-100/80 dark:hover:bg-white/5 ${
+            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/[0.05] ${
               isCollapsedOnDesktop
-                ? 'w-full lg:w-10 lg:h-10 px-3 lg:px-0 py-2 lg:py-0 flex items-center justify-between lg:justify-center'
-                : 'w-full px-3 py-2 flex items-center justify-between text-xs font-semibold'
+                ? 'w-full lg:w-11 lg:h-11 px-3 lg:px-0 min-h-[38px] lg:min-h-0 flex items-center justify-between lg:justify-center'
+                : 'w-full px-3 min-h-[38px] py-1.5 flex items-center justify-between text-[13px] font-medium'
             }`}
           >
             <div
@@ -311,7 +353,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 isCollapsedOnDesktop ? 'gap-2.5 lg:gap-0' : 'gap-2.5'
               }`}
             >
-              <HelpCircle className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
+              <HelpCircle className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-[#1b75bc] dark:group-hover:text-[#54b0e2] transition-colors shrink-0" />
               <span
                 className={`truncate ${
                   isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
@@ -320,13 +362,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 Help & Guide
               </span>
             </div>
-            <span
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-200/60 dark:bg-white/10 text-slate-500 dark:text-slate-400 ${
+            <kbd
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/[0.06] border border-slate-200/80 dark:border-white/10 text-slate-500 dark:text-slate-400 ${
                 isCollapsedOnDesktop ? 'inline-block lg:hidden' : 'inline-block'
               }`}
             >
               F1
-            </span>
+            </kbd>
           </button>
 
           {/* Settings */}
@@ -339,10 +381,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
             title="Settings"
             aria-label="Settings"
-            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/5 ${
+            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/[0.05] ${
               isCollapsedOnDesktop
-                ? 'w-full lg:w-10 lg:h-10 px-3 lg:px-0 py-2 lg:py-0 flex items-center justify-between lg:justify-center'
-                : 'w-full px-3 py-2 flex items-center justify-between text-xs font-semibold'
+                ? 'w-full lg:w-11 lg:h-11 px-3 lg:px-0 min-h-[38px] lg:min-h-0 flex items-center justify-between lg:justify-center'
+                : 'w-full px-3 min-h-[38px] py-1.5 flex items-center justify-between text-[13px] font-medium'
             }`}
           >
             <div
@@ -350,7 +392,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 isCollapsedOnDesktop ? 'gap-2.5 lg:gap-0' : 'gap-2.5'
               }`}
             >
-              <Settings className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300 shrink-0" />
+              <Settings className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-[#1b75bc] dark:group-hover:text-[#54b0e2] transition-colors shrink-0" />
               <span
                 className={`truncate ${
                   isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
@@ -371,10 +413,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
             title="Backup & Restore Data"
             aria-label="Backup & Restore Data"
-            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/5 ${
+            className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/[0.05] ${
               isCollapsedOnDesktop
-                ? 'w-full lg:w-10 lg:h-10 px-3 lg:px-0 py-2 lg:py-0 flex items-center justify-between lg:justify-center'
-                : 'w-full px-3 py-2 flex items-center justify-between text-xs font-semibold'
+                ? 'w-full lg:w-11 lg:h-11 px-3 lg:px-0 min-h-[38px] lg:min-h-0 flex items-center justify-between lg:justify-center'
+                : 'w-full px-3 min-h-[38px] py-1.5 flex items-center justify-between text-[13px] font-medium'
             }`}
           >
             <div
@@ -382,7 +424,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 isCollapsedOnDesktop ? 'gap-2.5 lg:gap-0' : 'gap-2.5'
               }`}
             >
-              <Database className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300 shrink-0" />
+              <Database className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-[#1b75bc] dark:group-hover:text-[#54b0e2] transition-colors shrink-0" />
               <span
                 className={`truncate ${
                   isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
@@ -404,10 +446,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }}
               title="Transfer Data (PC/Phone)"
               aria-label="Transfer Data (PC/Phone)"
-              className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/5 ${
+              className={`transition-colors cursor-pointer group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/80 dark:hover:bg-white/[0.05] ${
                 isCollapsedOnDesktop
-                  ? 'w-full lg:w-10 lg:h-10 px-3 lg:px-0 py-2 lg:py-0 flex items-center justify-between lg:justify-center'
-                  : 'w-full px-3 py-2 flex items-center justify-between text-xs font-semibold'
+                  ? 'w-full lg:w-11 lg:h-11 px-3 lg:px-0 min-h-[38px] lg:min-h-0 flex items-center justify-between lg:justify-center'
+                  : 'w-full px-3 min-h-[38px] py-1.5 flex items-center justify-between text-[13px] font-medium'
               }`}
             >
               <div
@@ -415,7 +457,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   isCollapsedOnDesktop ? 'gap-2.5 lg:gap-0' : 'gap-2.5'
                 }`}
               >
-                <QrCode className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300 shrink-0" />
+                <QrCode className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-[#1b75bc] dark:group-hover:text-[#54b0e2] transition-colors shrink-0" />
                 <span
                   className={`truncate ${
                     isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
@@ -427,18 +469,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
-          {/* Subtle Ministry indicator (plain text only, strictly no logo) */}
+          {/* Collapsed Desktop Theme Toggle */}
+          {isCollapsedOnDesktop && (
+            <button
+              type="button"
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              aria-label={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              className="hidden lg:flex w-11 h-11 items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-slate-100/80 dark:hover:bg-white/[0.05] transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+            >
+              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          )}
+
+          {/* Quiet Congregation Identity + Theme Quick-Toggle */}
           <div
-            className={`pt-2 px-1 text-left ${
-              isCollapsedOnDesktop ? 'block lg:hidden' : 'block'
+            className={`pt-2.5 mt-1.5 border-t border-slate-200/60 dark:border-white/[0.07] px-2 flex items-center justify-between gap-2 ${
+              isCollapsedOnDesktop ? 'flex lg:hidden' : 'flex'
             }`}
           >
-            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
-              WWCF Santa Cruz
-            </p>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
-              Worship Ministry Scheduler
-            </p>
+            <div className="min-w-0 text-left">
+              <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 truncate">
+                WWCF Santa Cruz
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                Worship Song Line-up Scheduler
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              aria-label={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              className="w-8 h-8 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-white/[0.04] hover:bg-slate-100 dark:hover:bg-white/10 text-slate-500 dark:text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] flex items-center justify-center shrink-0 transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+            >
+              {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </div>
       </aside>

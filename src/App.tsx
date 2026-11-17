@@ -17,7 +17,7 @@ import { SongService } from './services/songService';
 import { SongFamilyService } from './services/songFamilyService';
 import { LineupHistoryService } from './services/lineupHistoryService';
 import { GoogleAuthService, RemoteConflictPayload } from './services/googleAuthService';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, getMainContentOffsetClass } from './components/Sidebar';
 import { Header } from './components/Header';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { DashboardView } from './components/DashboardView';
@@ -47,7 +47,7 @@ const DeleteAllDataModal = React.lazy(() => import('./components/DeleteAllDataMo
 const NewLineupModal = React.lazy(() => import('./components/NewLineupModal').then((m) => ({ default: m.NewLineupModal })));
 import { sortTags } from './utils/tagUtils';
 import { getManilaNowISO, getManilaTodayString } from './utils/dateUtils';
-import { getNextAvailableServiceDate, getSmartInitialServiceDetails, ensureMonthlyPlaceholders, isScheduleEmpty } from './utils/scheduleUtils';
+import { getNextAvailableServiceDate, getSmartInitialServiceDetails, ensureMonthlyPlaceholders, isScheduleEmpty, applyBulkNoServiceConversion } from './utils/scheduleUtils';
 import { validateUniqueMemberRoles } from './utils/memberUtils';
 import { soundEffects } from './utils/audioFeedback';
 import { speechAssistant } from './utils/speechAssistant';
@@ -57,8 +57,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => StorageService.getDarkMode());
+  const [isAmoledEnabled, setIsAmoledEnabled] = useState<boolean>(() => StorageService.getAmoledEnabled());
+  const [isGlassModeEnabled, setIsGlassModeEnabled] = useState<boolean>(() => StorageService.getGlassMode());
   const [accessibilitySettings, setAccessibilitySettings] = useState<AccessibilitySettings>(() =>
     StorageService.getAccessibilitySettings()
+  );
+
+  const handleSetGlassModeEnabled = useCallback(
+    (enabled: boolean) => {
+      if (Boolean(accessibilitySettings.performanceMode)) {
+        return;
+      }
+      setIsGlassModeEnabled(Boolean(enabled));
+    },
+    [accessibilitySettings.performanceMode]
   );
 
   // Layout Preferences State
@@ -305,7 +317,7 @@ export default function App() {
         remoteModifiedTime: primary.modifiedTime,
         candidateFiles: candidates,
         remoteData: remoteContent || {
-          app: 'WWCF Santa Cruz Worship Ministry',
+          app: 'WWCF Worship Song Line-up Scheduler',
           version: '1.0',
           data: {}
         }
@@ -401,15 +413,18 @@ export default function App() {
     setActiveTab('dashboard');
   };
 
-  // Dark Mode Sync
+  // Theme, AMOLED & Glass Mode DOM Sync (respecting Performance Mode suspension)
   useEffect(() => {
     StorageService.saveDarkMode(isDarkMode);
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDarkMode]);
+    StorageService.saveAmoledEnabled(isAmoledEnabled);
+    StorageService.saveGlassMode(isGlassModeEnabled);
+    StorageService.applyAppearanceToDOM({
+      isDarkMode,
+      amoledEnabled: isAmoledEnabled,
+      glassModeEnabled: isGlassModeEnabled,
+      performanceMode: Boolean(accessibilitySettings.performanceMode)
+    });
+  }, [isDarkMode, isAmoledEnabled, isGlassModeEnabled, accessibilitySettings.performanceMode]);
 
   // Accessibility Settings DOM Sync & Speech Assistant Engine
   useEffect(() => {
@@ -685,6 +700,119 @@ export default function App() {
       }
     });
   };
+
+  const handleBulkMarkNoService = useCallback((
+    ids: string[],
+    reason?: string
+  ): {
+    success: boolean;
+    convertedCount: number;
+    skippedNoServiceCount: number;
+    skippedPlaceholderCount: number;
+  } => {
+    if (!ids || ids.length === 0) {
+      return {
+        success: false,
+        convertedCount: 0,
+        skippedNoServiceCount: 0,
+        skippedPlaceholderCount: 0
+      };
+    }
+
+    const prevSchedules = [...schedules];
+    const conversion = applyBulkNoServiceConversion(ids, prevSchedules, reason);
+
+    if (conversion.convertedCount === 0) {
+      const skippedNotes: string[] = [];
+      if (conversion.skippedNoServiceCount > 0) {
+        skippedNotes.push(`${conversion.skippedNoServiceCount} already marked as No Service`);
+      }
+      if (conversion.skippedPlaceholderCount > 0) {
+        skippedNotes.push(`${conversion.skippedPlaceholderCount} un-saved monthly placeholder${conversion.skippedPlaceholderCount === 1 ? '' : 's'}`);
+      }
+      showToast(
+        skippedNotes.length > 0
+          ? `No saved line-ups were converted (${skippedNotes.join(', ')}).`
+          : 'No eligible saved line-ups were found to mark as No Service.',
+        'info'
+      );
+      return {
+        success: false,
+        convertedCount: 0,
+        skippedNoServiceCount: conversion.skippedNoServiceCount,
+        skippedPlaceholderCount: conversion.skippedPlaceholderCount
+      };
+    }
+
+    const nextSchedules = [...conversion.nextSchedules];
+    try {
+      StorageService.saveSchedulesChecked(nextSchedules);
+    } catch (err) {
+      console.error('[App] Failed to mark selected schedules as No Service:', err);
+      showToast('Could not mark selected line-ups as No Service. Browser storage may be full.', 'danger');
+      return {
+        success: false,
+        convertedCount: 0,
+        skippedNoServiceCount: conversion.skippedNoServiceCount,
+        skippedPlaceholderCount: conversion.skippedPlaceholderCount
+      };
+    }
+
+    setSchedules(nextSchedules);
+
+    const convertedMap = new Map(conversion.convertedSchedules.map((s) => [s.id, s]));
+    setEditingSchedule((prev) => (prev && convertedMap.has(prev.id) ? convertedMap.get(prev.id)! : prev));
+
+    const firstConverted = conversion.convertedSchedules[0];
+    const historyDescription =
+      conversion.convertedCount === 1
+        ? `Marked ${firstConverted.serviceDate} (${firstConverted.serviceType}) as No Service`
+        : `Marked ${conversion.convertedCount} line-ups as No Service`;
+
+    LineupHistoryService.pushAppAction({
+      description: historyDescription,
+      undo: () => {
+        StorageService.saveSchedulesChecked(prevSchedules);
+        setSchedules(prevSchedules);
+        setEditingSchedule((prev) => {
+          if (!prev || !convertedMap.has(prev.id)) return prev;
+          return prevSchedules.find((s) => s.id === prev.id) || prev;
+        });
+      },
+      redo: () => {
+        StorageService.saveSchedulesChecked(nextSchedules);
+        setSchedules(nextSchedules);
+        setEditingSchedule((prev) => (prev && convertedMap.has(prev.id) ? convertedMap.get(prev.id)! : prev));
+      }
+    });
+
+    const skippedDetails: string[] = [];
+    if (conversion.skippedNoServiceCount > 0) {
+      skippedDetails.push(`${conversion.skippedNoServiceCount} already No Service`);
+    }
+    if (conversion.skippedPlaceholderCount > 0) {
+      skippedDetails.push(`${conversion.skippedPlaceholderCount} placeholder${conversion.skippedPlaceholderCount === 1 ? '' : 's'}`);
+    }
+
+    const baseMessage =
+      conversion.convertedCount === 1
+        ? `Marked ${firstConverted.serviceDate} (${firstConverted.serviceType}) as No Service.`
+        : `Marked ${conversion.convertedCount} line-ups as No Service.`;
+
+    showToast(
+      skippedDetails.length > 0
+        ? `${baseMessage} Skipped ${skippedDetails.join(' and ')}.`
+        : baseMessage,
+      'success'
+    );
+
+    return {
+      success: true,
+      convertedCount: conversion.convertedCount,
+      skippedNoServiceCount: conversion.skippedNoServiceCount,
+      skippedPlaceholderCount: conversion.skippedPlaceholderCount
+    };
+  }, [schedules]);
 
   const handleResetSchedulerForm = () => {
     setModalConfig({
@@ -1028,26 +1156,23 @@ export default function App() {
     }
   );
 
-  // Compute layout padding for desktop based on orientation, sidebar position, and sidebar visibility
-  const contentPaddingClass = useMemo(() => {
-    if (layoutPreferences.navigationOrientation === 'horizontal') {
-      return '';
-    }
-    if (layoutPreferences.sidebarVisibility === 'hidden') {
-      return '';
-    }
-    if (layoutPreferences.sidebarVisibility === 'collapsed') {
-      return layoutPreferences.sidebarPosition === 'right' ? 'lg:pr-[54px]' : 'lg:pl-[54px]';
-    }
-    return layoutPreferences.sidebarPosition === 'right' ? 'lg:pr-[260px]' : 'lg:pl-[260px]';
-  }, [
-    layoutPreferences.navigationOrientation,
-    layoutPreferences.sidebarVisibility,
-    layoutPreferences.sidebarPosition
-  ]);
+  // Compute layout padding for desktop from single source of truth shared with Sidebar
+  const contentPaddingClass = useMemo(
+    () =>
+      getMainContentOffsetClass({
+        navigationOrientation: layoutPreferences.navigationOrientation,
+        sidebarPosition: layoutPreferences.sidebarPosition,
+        sidebarVisibility: layoutPreferences.sidebarVisibility
+      }),
+    [
+      layoutPreferences.navigationOrientation,
+      layoutPreferences.sidebarVisibility,
+      layoutPreferences.sidebarPosition
+    ]
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex transition-colors">
+    <div className="min-h-screen wwcf-app-shell bg-[#f4f7fb] dark:bg-black text-slate-900 dark:text-slate-100 flex transition-colors">
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -1068,7 +1193,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 ${contentPaddingClass} flex flex-col min-w-0 transition-all duration-300`}>
+      <div className={`flex-1 ${contentPaddingClass} flex flex-col min-w-0 wwcf-main-content transition-[padding] duration-200 ease-out motion-reduce:transition-none`}>
         <Header
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -1105,7 +1230,7 @@ export default function App() {
           }
         />
 
-        <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 sm:py-6 max-w-7xl w-full mx-auto">
           <ErrorBoundary
             key={activeTab}
             fallbackTitle="View Interrupted"
@@ -1124,6 +1249,7 @@ export default function App() {
                     members={members}
                     schedules={schedules}
                     allSongs={songs}
+                    songFamilies={songFamilies}
                     setActiveTab={setActiveTab}
                     onEditSchedule={handleEditScheduleFromList}
                     onUpdateSchedules={handleUpdateSchedules}
@@ -1167,6 +1293,7 @@ export default function App() {
                     onDuplicateSchedule={handleDuplicateSchedule}
                     onDeleteSchedule={handleDeleteSchedule}
                     onBulkDeleteSchedules={handleBulkDeleteSchedules}
+                    onMarkNoService={handleBulkMarkNoService}
                     onExportPDF={handleExportPDF}
                     onExportPNG={handleExportPNG}
                     onUpdateSchedules={handleUpdateSchedules}
@@ -1222,6 +1349,10 @@ export default function App() {
           onClose={() => setIsSettingsOpen(false)}
           isDarkMode={isDarkMode}
           setIsDarkMode={setIsDarkMode}
+          isAmoledEnabled={isAmoledEnabled}
+          setIsAmoledEnabled={setIsAmoledEnabled}
+          isGlassModeEnabled={isGlassModeEnabled}
+          setIsGlassModeEnabled={handleSetGlassModeEnabled}
           accessibilitySettings={accessibilitySettings}
           onUpdateAccessibility={setAccessibilitySettings}
           onOpenOnboarding={() => {

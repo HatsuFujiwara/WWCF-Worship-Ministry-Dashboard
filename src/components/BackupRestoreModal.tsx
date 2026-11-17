@@ -66,7 +66,7 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
       const memberAvailability = AvailabilityService.getAvailabilityListSync();
       const songFamiliarity = FamiliarityService.getFamiliarityListSync();
       const backupObj = {
-        app: 'WWCF Santa Cruz Worship Ministry',
+        app: 'WWCF Worship Song Line-up Scheduler',
         version: '1.0',
         exportedAt: new Date().toISOString(),
         data: {
@@ -132,10 +132,13 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
           (dataContent.members?.length || 0) === 0 &&
           (dataContent.songs?.length || 0) === 0 &&
           (dataContent.schedules?.length || 0) === 0 &&
+          (dataContent.labels?.length || 0) === 0 &&
           (dataContent.songFamilies?.length || 0) === 0 &&
-          (dataContent.templates?.length || 0) === 0
+          (dataContent.templates?.length || 0) === 0 &&
+          (dataContent.memberAvailability?.length || 0) === 0 &&
+          (dataContent.songFamiliarity?.length || 0) === 0
         ) {
-          showToast('No valid church members, songs, families, templates, or lineups found in this backup file.', 'danger');
+          showToast('No valid WWCF records were found in this backup file.', 'danger');
           return;
         }
 

@@ -1,5 +1,5 @@
 /**
- * Central Version-Aware Backup Envelope Validator for WWCF Santa Cruz Worship Ministry Dashboard
+ * Central Version-Aware Backup Envelope Validator for WWCF Worship Song Line-up Scheduler
  * 
  * Validates and migrates backup files, cloud sync payloads, and QR transfer data.
  * Guarantees structural integrity, schema compatibility, bounded limits, and identity safety.
@@ -63,6 +63,8 @@ export interface BackupValidationResult {
 }
 
 const SUPPORTED_APPS = [
+  'wwcf worship song line-up scheduler',
+  'wwcf-worship-song-line-up-scheduler',
   'wwcf santa cruz worship ministry',
   'wwcf worship ministry dashboard',
   'wwcf santa cruz worship song line-up scheduler',
@@ -772,7 +774,7 @@ export class BackupValidationService {
     }
 
     const envelope: ValidatedBackupEnvelope = {
-      app: 'WWCF Santa Cruz Worship Ministry',
+      app: 'WWCF Worship Song Line-up Scheduler',
       version: typeof payload.version === 'string' ? payload.version : '1.0',
       exportedAt: typeof payload.exportedAt === 'string' ? payload.exportedAt : new Date().toISOString(),
       data: {

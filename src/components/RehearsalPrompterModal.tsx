@@ -401,7 +401,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
       {/* Top Bar */}
       <header className="px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-black/90 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="px-2.5 py-1 rounded-lg bg-[#1b75bc] text-white font-black text-xs uppercase tracking-wider">
+          <div className="px-2.5 py-1 rounded-lg bg-[#1b75bc] text-white font-bold text-xs uppercase tracking-wider">
             WWCF Live Prompter
           </div>
           <div>
@@ -422,7 +422,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               role="tab"
               aria-selected={prompterMode === 'vocal'}
               onClick={() => setPrompterMode('vocal')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                 prompterMode === 'vocal'
                   ? 'bg-[#1b75bc] text-white'
                   : 'text-white/70 hover:text-white'
@@ -435,7 +435,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               role="tab"
               aria-selected={prompterMode === 'musician'}
               onClick={() => setPrompterMode('musician')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                 prompterMode === 'musician'
                   ? 'bg-[#1b75bc] text-white'
                   : 'text-white/70 hover:text-white'
@@ -459,7 +459,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
           <button
             type="button"
             onClick={() => setShowRoster((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
               showRoster ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20 text-white'
             }`}
           >
@@ -471,7 +471,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
             <button
               type="button"
               onClick={() => setShowLyrics((prev) => !prev)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                 showLyrics ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20 text-white'
               }`}
             >
@@ -533,7 +533,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                     </span>
                   )}
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight [text-wrap:balance]">
                   {currentItem.title}
                 </h1>
               </div>
@@ -541,14 +541,14 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <div className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/15">
                   <div className="text-[10px] uppercase font-bold text-white/50">Performed Key</div>
-                  <div className={`text-base font-bold ${currentItem.key ? 'text-[#54b0e2]' : 'text-white/50 italic text-xs'}`}>
+                  <div className={`text-base font-bold tabular-nums ${currentItem.key ? 'text-[#54b0e2]' : 'text-white/50 italic text-xs'}`}>
                     {currentItem.key || 'Performed key not set'}
                   </div>
                 </div>
                 {currentItem.originalKey && (
                   <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
                     <div className="text-[10px] uppercase font-bold text-white/40">Original Key</div>
-                    <div className="text-base font-bold text-white/80">{currentItem.originalKey}</div>
+                    <div className="text-base font-bold tabular-nums text-white/80">{currentItem.originalKey}</div>
                   </div>
                 )}
               </div>
@@ -598,7 +598,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                       href={jumpUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/15 border border-white/15 text-white/90 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/15 border border-white/15 text-white/90 transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
                     >
                       <span className="font-mono font-bold text-[#54b0e2] tabular-nums">
                         {formatMarkerTimestamp(marker.timeSeconds)}
@@ -686,10 +686,10 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               {/* Category and Index Badge */}
               <div className="flex flex-wrap items-center gap-3">
                 <span
-                  className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${
+                  className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
                     currentItem.category === 'praise'
                       ? 'bg-amber-500 text-black'
-                      : 'bg-indigo-500 text-white'
+                      : 'bg-[#1b75bc] text-white'
                   }`}
                 >
                   {currentItem.category === 'praise' ? <Zap className="w-3.5 h-3.5" /> : <Heart className="w-3.5 h-3.5" />}
@@ -697,14 +697,14 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                 </span>
 
                 {currentItem.bpm && (
-                  <span className="px-3 py-1 rounded-full text-xs font-black bg-white/10 text-white border border-white/20 flex items-center gap-1">
+                  <span className="px-3 py-1 rounded-full text-xs font-bold tabular-nums bg-white/10 text-white border border-white/20 flex items-center gap-1">
                     <Activity className="w-3 h-3 text-[#54b0e2]" />
                     <span>{currentItem.bpm} BPM</span>
                   </span>
                 )}
 
                 {currentItem.duration && (
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white/10 text-white/80 border border-white/20 flex items-center gap-1">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold tabular-nums bg-white/10 text-white/80 border border-white/20 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     <span>{currentItem.duration}</span>
                   </span>
@@ -712,7 +712,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               </div>
 
               {/* Giant Title */}
-              <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-white tracking-tight leading-tight">
+              <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-white tracking-tight leading-tight [text-wrap:balance]">
                 {currentItem.title}
               </h1>
 
@@ -721,7 +721,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                 {currentItem.key ? (
                   <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/20">
                     <div className="text-[10px] uppercase font-bold text-white/50 tracking-wider">Performed Key</div>
-                    <div className="text-2xl font-black text-[#54b0e2]">{currentItem.key}</div>
+                    <div className="text-2xl font-bold tabular-nums text-[#54b0e2]">{currentItem.key}</div>
                   </div>
                 ) : (
                   <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10">
@@ -733,7 +733,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                 {currentItem.originalKey && (
                   <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10">
                     <div className="text-[10px] uppercase font-bold text-white/40 tracking-wider">Original Key</div>
-                    <div className="text-xl font-bold text-white/80">{currentItem.originalKey}</div>
+                    <div className="text-xl font-bold tabular-nums text-white/80">{currentItem.originalKey}</div>
                   </div>
                 )}
               </div>
@@ -741,7 +741,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
               {/* Transition Note to Next Song */}
               {currentItem.transitionNote && (
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-amber-400 mb-1 flex items-center gap-1">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1 flex items-center gap-1">
                     <ArrowRight className="w-3 h-3" />
                     <span>Transition Cue</span>
                   </div>
@@ -805,7 +805,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowRoster(false)}
-                    className="text-xs text-white/40 hover:text-white cursor-pointer"
+                    className="text-xs text-white/50 hover:text-white cursor-pointer rounded px-1.5 py-0.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
                   >
                     Hide
                   </button>
@@ -839,7 +839,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowLyrics(false)}
-                    className="text-xs text-white/40 hover:text-white cursor-pointer"
+                    className="text-xs text-white/50 hover:text-white cursor-pointer rounded px-1.5 py-0.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
                   >
                     Hide
                   </button>
@@ -881,7 +881,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
           type="button"
           onClick={handlePrev}
           disabled={currentIndex === 0}
-          className={`px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
             currentIndex === 0
               ? 'bg-white/5 text-white/20 cursor-not-allowed'
               : 'bg-white/10 hover:bg-white/20 text-white active:scale-95'
@@ -899,7 +899,7 @@ export const RehearsalPrompterModal: React.FC<RehearsalPrompterModalProps> = ({
           type="button"
           onClick={handleNext}
           disabled={currentIndex === items.length - 1}
-          className={`px-6 py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
+          className={`px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
             currentIndex === items.length - 1
               ? 'bg-white/5 text-white/20 cursor-not-allowed'
               : 'bg-[#1b75bc] hover:bg-[#155d97] text-white active:scale-95 shadow-md'

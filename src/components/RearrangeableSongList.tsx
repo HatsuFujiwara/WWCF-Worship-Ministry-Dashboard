@@ -43,7 +43,7 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
     }
   }, []);
   const isReducedMotion = accessibility.reducedMotion;
-  const isLowEndMode = accessibility.performanceMode;
+  const isPerformanceMode = accessibility.performanceMode;
 
   // Normalized items: ensure every item has a reviewed category
   const normalizedItems = useMemo<PlaylistItem[]>(() => {
@@ -461,7 +461,7 @@ export const RearrangeableSongList: React.FC<RearrangeableSongListProps> = ({
           data-drop-category={category}
           className={`group relative flex items-center gap-2.5 p-2.5 rounded-xl border transition-all duration-150 ${
             isBeingDragged
-              ? isLowEndMode
+              ? isPerformanceMode
                 ? 'bg-indigo-100 dark:bg-indigo-950 border-indigo-500 opacity-90'
                 : 'bg-white dark:bg-black border-[#1b75bc] dark:border-[#54b0e2] shadow-xl ring-2 ring-[#1b75bc]/30 scale-[1.01] z-20 opacity-95'
               : isChecked

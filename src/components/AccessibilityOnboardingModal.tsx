@@ -136,7 +136,7 @@ export const AccessibilityOnboardingModal: React.FC<AccessibilityOnboardingModal
       aria-hidden={isBlocked}
       inert={isBlocked ? true : undefined}
     >
-      <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
+      <div className="w-full max-w-lg wwcf-glass-modal bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
         {/* Header with AMOLED styling */}
         <div className="flex items-start justify-between p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3.5">
@@ -331,7 +331,7 @@ export const AccessibilityOnboardingModal: React.FC<AccessibilityOnboardingModal
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Increases border definition and text contrast for easier legibility while preserving AMOLED dark.
+                  Increases border definition and text contrast for easier legibility across light and dark modes.
                 </p>
               </div>
 
@@ -423,20 +423,20 @@ export const AccessibilityOnboardingModal: React.FC<AccessibilityOnboardingModal
               </button>
             </div>
 
-            {/* 6. Low-End Device Mode */}
+            {/* 6. Performance Mode */}
             <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
               <div className="space-y-0.5 pr-4 flex-1">
                 <div className="flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                   <span className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm">
-                    Low-End Device Mode
+                    Performance Mode
                   </span>
                   <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-slate-200/70 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
                     Default: OFF
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Disables heavy backdrop blur filters and GPU animations to conserve battery and run smoothly on older devices.
+                  Disables Glass Mode translucency, backdrop blur filters, shadows, and non-essential animations for smooth performance.
                 </p>
               </div>
 
@@ -444,7 +444,7 @@ export const AccessibilityOnboardingModal: React.FC<AccessibilityOnboardingModal
                 type="button"
                 role="switch"
                 aria-checked={settings.performanceMode}
-                aria-label="Toggle Low-End Device Mode"
+                aria-label="Toggle Performance Mode"
                 onClick={() => handleToggle('performanceMode')}
                 className={`w-12 h-6.5 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out shrink-0 ${
                   settings.performanceMode ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'

@@ -10,76 +10,62 @@
   --primary-dark-bg: #0f2b44;
 
   /* WWCF Surface Hierarchy 0-4 (Light Mode) */
-  --surface-0: #f8fafc;
+  --surface-0: #f4f7fb;
   --surface-1: #ffffff;
   --surface-2: #f1f5f9;
   --surface-3: #ffffff;
   --surface-4: #e2e8f0;
 
-  /* Clean, Service-Ready Surfaces (Light Mode) */
-  --glass-header: rgba(255, 255, 255, 0.96);
+  /* Clean, Opaque Service-Ready Surfaces by Default (Light Mode, Glass Mode OFF) */
+  --glass-header: #ffffff;
   --glass-sidebar: #ffffff;
   --glass-card: #ffffff;
   --glass-modal: #ffffff;
-  --glass-border: rgba(226, 232, 240, 0.9);
-  --glass-blur: 8px;
+  --glass-toolbar: #ffffff;
+  --glass-border: rgba(203, 213, 225, 0.85);
+  --wwcf-border: rgba(203, 213, 225, 0.85);
+  --wwcf-border-strong: rgba(148, 163, 184, 0.65);
+  --glass-blur: 0px;
 }
 
-/* AMOLED Dark Theme CSS Variable Overrides */
+/* Standard Dark Theme CSS Variable Overrides (Layered dark surfaces — AMOLED OFF) */
 .dark {
-  /* WWCF Surface Hierarchy 0-4 (AMOLED Dark Mode) */
-  --surface-0: #000000; /* Level 0: AMOLED Pure Black Foundation */
-  --surface-1: #0A0A0A; /* Level 1: Standard Content Surface */
-  --surface-2: #121212; /* Level 2: Elevated Surface */
-  --surface-3: #181818; /* Level 3: Floating / Modal Surface */
-  --surface-4: #222222; /* Level 4: Active / Focus Surface */
+  /* WWCF Surface Hierarchy 0-4 (Standard Dark Mode — layered obsidian slate canvas) */
+  --surface-0: #070a10; /* Level 0: Foundation */
+  --surface-1: #0b0e13; /* Level 1: Standard Card / Content Surface */
+  --surface-2: #11161e; /* Level 2: Elevated / Inset / Input Surface */
+  --surface-3: #161c26; /* Level 3: Floating / Modal / Popover Surface */
+  --surface-4: #1e2633; /* Level 4: Active / Focus Surface */
 
-  /* Clean, Service-Ready Surfaces (AMOLED Dark Mode) */
-  --glass-header: rgba(10, 10, 10, 0.92);
-  --glass-sidebar: #0A0A0A;
-  --glass-card: #0A0A0A;
-  --glass-modal: #121212;
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: 8px;
+  /* Clean, Opaque Service-Ready Surfaces by Default (Standard Dark Mode, Glass Mode OFF) */
+  --glass-header: #0b0e13;
+  --glass-sidebar: #07090d;
+  --glass-card: #0b0e13;
+  --glass-modal: #11161e;
+  --glass-toolbar: #0b0e13;
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --wwcf-border: rgba(255, 255, 255, 0.1);
+  --wwcf-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-blur: 0px;
 
-  /* Primary Background: Pure Black */
-  --color-slate-950: #000000;
+  /* Primary & Layered Dark Slate Scale */
+  --color-slate-950: #06090e;
+  --color-slate-900: #0b0e13;
+  --color-slate-850: #0f131a;
+  --color-slate-800: #131821;
+  --color-slate-750: #181f2a;
+  --color-slate-700: #212834;
+  --color-slate-600: #2e3746;
 
-  /* Secondary Background (Cards, Dialogs, Modals, Header, Sidebar): #0A0A0A */
-  --color-slate-900: #0A0A0A;
-
-  /* AMOLED Intermediate Surfaces */
-  --color-slate-850: #0e0e0e;
-
-  /* Elevated Surfaces & Inputs: #111111 */
-  --color-slate-800: #111111;
-  --color-slate-750: #161616;
-
-  /* Subtle Borders & Dividers: #1F1F1F */
-  --color-slate-700: #1F1F1F;
-
-  /* Active/Hover Borders: #262626 */
-  --color-slate-600: #262626;
-
-  /* Disabled & Muted Text: #6B7280 */
+  /* Readable Dark Text Hierarchy */
   --color-slate-500: #6B7280;
-
-  /* Muted Labels & Secondary Icons: #8C8C8C */
   --color-slate-400: #8C8C8C;
-
-  /* Secondary Text: #B3B3B3 */
   --color-slate-300: #B3B3B3;
-
-  /* High Contrast Text: #E5E5E5 */
   --color-slate-200: #E5E5E5;
-
-  /* Primary White Text: #FFFFFF */
   --color-slate-100: #FFFFFF;
-
-  /* Slate 50 in dark mode fallback */
   --color-slate-50: #0A0A0A;
 
-  /* AMOLED Brand Blue / Indigo Tints with #1b75bc accent */
+  /* Brand Blue / Indigo Tints with #1b75bc accent */
   --color-indigo-950: #081929;
   --color-indigo-900: #0d2840;
   --color-indigo-800: #143e63;
@@ -105,14 +91,18 @@
   --color-rose-900: #2e040b;
   --color-rose-800: #4d0713;
 
-  background-color: #000000 !important;
+  background-color: #070a10 !important;
   color: #FFFFFF;
 }
 
-html.dark,
-body.dark {
-  background-color: #000000 !important;
+html.dark:not(.amoled),
+body.dark:not(.amoled) {
+  background-color: #070a10 !important;
   color: #FFFFFF;
+}
+
+.dark:not(.amoled) .wwcf-app-shell {
+  background-color: #070a10;
 }
 
 /* Custom scrollbars for AMOLED Dark Mode */
@@ -528,6 +518,11 @@ html.text-size-xl {
   scroll-behavior: auto !important;
 }
 
+.reduced-motion .wwcf-glass-sidebar,
+.reduced-motion .wwcf-main-content {
+  transition: none !important;
+}
+
 /* ==========================================================================
    Accessibility: Display Density Modes
    ========================================================================== */
@@ -555,25 +550,47 @@ html.density-spacious .space-y-4 > * + * {
 }
 
 /* ==========================================================================
-   Accessibility & Performance: Low-End Hardware / Performance Mode
+   Accessibility & Performance: Performance Mode
+   Authoritative gate: disables Glass Mode translucency, ambient backdrop gradients,
+   blur, animations, transitions, shadows, CSS filters, and will-change.
    ========================================================================== */
+html.performance-mode,
 .performance-mode {
   --glass-header: #ffffff !important;
   --glass-sidebar: #ffffff !important;
   --glass-card: #ffffff !important;
   --glass-modal: #ffffff !important;
-  --glass-border: #e2e8f0 !important;
+  --glass-toolbar: #ffffff !important;
+  --glass-border: #cbd5e1 !important;
+  --glass-blur: 0px !important;
+  filter: none !important;
+}
+
+html.dark.performance-mode:not(.amoled),
+.dark.performance-mode:not(.amoled),
+.dark:not(.amoled) .performance-mode {
+  --glass-header: #0b0e13 !important;
+  --glass-sidebar: #07090d !important;
+  --glass-card: #0b0e13 !important;
+  --glass-modal: #11161e !important;
+  --glass-toolbar: #0b0e13 !important;
+  --glass-border: #212834 !important;
   --glass-blur: 0px !important;
 }
 
-.dark.performance-mode,
-.dark .performance-mode {
-  --glass-header: #0A0A0A !important;
-  --glass-sidebar: #0A0A0A !important;
-  --glass-card: #121212 !important;
-  --glass-modal: #181818 !important;
-  --glass-border: #1F1F1F !important;
+html.dark.amoled.performance-mode,
+.dark.amoled.performance-mode {
+  --glass-header: #000000 !important;
+  --glass-sidebar: #000000 !important;
+  --glass-card: #000000 !important;
+  --glass-modal: #000000 !important;
+  --glass-toolbar: #000000 !important;
+  --glass-border: rgba(255, 255, 255, 0.14) !important;
   --glass-blur: 0px !important;
+}
+
+html.performance-mode .wwcf-app-shell {
+  background-image: none !important;
 }
 
 .performance-mode *,
@@ -583,15 +600,21 @@ html.density-spacious .space-y-4 > * + * {
   text-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  filter: none !important;
   animation: none !important;
   transition: none !important;
   will-change: auto !important;
 }
 
-/* Explicitly preserve essential state transitions (e.g. switch toggles) */
-.performance-mode [role="switch"] span,
-.performance-mode [role="switch"] div {
-  transition: transform 0.05s ease !important;
+/* Suppress decorative hover/press spatial transforms in Performance Mode */
+.performance-mode .card-hover-polish:hover,
+.performance-mode .card-hover-polish:active,
+.performance-mode .btn-press-feedback:active,
+.performance-mode .wwcf-interactive-row:hover,
+.performance-mode .wwcf-interactive-row:active,
+.performance-mode .btn-tactile:hover,
+.performance-mode .btn-tactile:active {
+  transform: none !important;
 }
 
 /* Instant opacity resolution without spatial translation */
@@ -613,14 +636,20 @@ html.density-spacious .space-y-4 > * + * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-.dark.performance-mode .backdrop-blur-xs,
-.dark.performance-mode .backdrop-blur-sm,
-.dark.performance-mode .backdrop-blur-md,
-.dark.performance-mode .backdrop-blur-lg {
-  background-color: #0A0A0A !important;
+.dark.performance-mode:not(.amoled) .backdrop-blur-xs,
+.dark.performance-mode:not(.amoled) .backdrop-blur-sm,
+.dark.performance-mode:not(.amoled) .backdrop-blur-md,
+.dark.performance-mode:not(.amoled) .backdrop-blur-lg {
+  background-color: #0b0e13 !important;
+}
+.dark.amoled.performance-mode .backdrop-blur-xs,
+.dark.amoled.performance-mode .backdrop-blur-sm,
+.dark.amoled.performance-mode .backdrop-blur-md,
+.dark.amoled.performance-mode .backdrop-blur-lg {
+  background-color: #000000 !important;
 }
 
-/* Surface Hierarchy & Glass Utility Classes */
+/* Surface Hierarchy & Shared Shell Utility Classes (Opaque by Default) */
 .surface-0 {
   background-color: var(--surface-0);
 }
@@ -639,48 +668,205 @@ html.density-spacious .space-y-4 > * + * {
 
 .wwcf-glass-header {
   background-color: var(--glass-header);
-  backdrop-filter: blur(var(--glass-blur, 14px));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 14px));
   border-color: var(--glass-border);
 }
 
 .wwcf-glass-sidebar {
   background-color: var(--glass-sidebar);
-  backdrop-filter: blur(var(--glass-blur, 16px));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 16px));
   border-color: var(--glass-border);
 }
 
 .wwcf-glass-card {
   background-color: var(--glass-card);
-  backdrop-filter: blur(var(--glass-blur, 12px));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 12px));
   border: 1px solid var(--glass-border);
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+}
+.dark .wwcf-glass-card {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
 }
 
 .wwcf-glass-modal {
   background-color: var(--glass-modal);
-  backdrop-filter: blur(var(--glass-blur, 16px));
-  -webkit-backdrop-filter: blur(var(--glass-blur, 16px));
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--wwcf-border);
 }
 
 /* Redesigned Workspace Surface & Layout Utilities */
 .wwcf-surface-hero {
   background-color: var(--surface-1);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--wwcf-border);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.45);
 }
 :root:not(.dark) .wwcf-surface-hero {
   background-color: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
 }
 
 .wwcf-panel-group {
   background-color: var(--surface-1);
   border: 1px solid var(--glass-border);
   border-radius: 1rem;
+}
+
+.wwcf-toolbar-sticky {
+  background-color: var(--glass-toolbar, #ffffff);
+  border: 1px solid var(--wwcf-border);
+}
+.dark .wwcf-toolbar-sticky {
+  background-color: var(--glass-toolbar, #0b0e13);
+}
+
+/* ==========================================================================
+   Optional Frosted Glass Mode (Light, Standard Dark & Dark + AMOLED)
+   Active ONLY when Glass Mode is ON and Performance Mode is OFF.
+   Applies selective backdrop blur + directional rim highlight + ambient depth
+   over a restrained static backdrop layer without overlapping heavy list blurs.
+   ========================================================================== */
+html.glass-mode:not(.dark):not(.performance-mode) {
+  --glass-header: rgba(255, 255, 255, 0.72);
+  --glass-sidebar: rgba(255, 255, 255, 0.78);
+  --glass-card: rgba(255, 255, 255, 0.84);
+  --glass-modal: rgba(255, 255, 255, 0.86);
+  --glass-toolbar: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(148, 163, 184, 0.34);
+  --wwcf-border: rgba(148, 163, 184, 0.34);
+  --glass-blur: 10px;
+}
+
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-app-shell {
+  background-color: #eef4fc;
+  background-image:
+    radial-gradient(640px 420px at 14% 4%, rgba(27, 117, 188, 0.11), transparent 70%),
+    radial-gradient(560px 380px at 88% 10%, rgba(84, 176, 226, 0.1), transparent 72%),
+    radial-gradient(620px 420px at 52% 96%, rgba(148, 163, 184, 0.1), transparent 74%);
+}
+
+html.dark.glass-mode:not(.amoled):not(.performance-mode) {
+  --glass-header: rgba(10, 14, 21, 0.72);
+  --glass-sidebar: rgba(7, 10, 16, 0.78);
+  --glass-card: rgba(12, 17, 26, 0.84);
+  --glass-modal: rgba(15, 21, 31, 0.85);
+  --glass-toolbar: rgba(10, 14, 21, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --wwcf-border: rgba(255, 255, 255, 0.14);
+  --glass-blur: 10px;
+}
+
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-app-shell {
+  background-color: #06090f;
+  background-image:
+    radial-gradient(660px 420px at 14% 4%, rgba(27, 117, 188, 0.18), transparent 72%),
+    radial-gradient(520px 360px at 88% 12%, rgba(84, 176, 226, 0.1), transparent 72%),
+    radial-gradient(600px 420px at 50% 98%, rgba(22, 93, 151, 0.1), transparent 74%);
+}
+
+html.dark.amoled.glass-mode:not(.performance-mode) {
+  --glass-header: rgba(3, 5, 9, 0.72);
+  --glass-sidebar: rgba(2, 4, 8, 0.78);
+  --glass-card: rgba(6, 9, 14, 0.84);
+  --glass-modal: rgba(8, 11, 16, 0.86);
+  --glass-toolbar: rgba(4, 6, 10, 0.78);
+  --glass-border: rgba(140, 203, 237, 0.18);
+  --wwcf-border: rgba(140, 203, 237, 0.18);
+  --glass-blur: 10px;
+}
+
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-app-shell {
+  background-color: #000000;
+  background-image:
+    radial-gradient(600px 380px at 16% 6%, rgba(27, 117, 188, 0.16), transparent 68%),
+    radial-gradient(460px 320px at 86% 14%, rgba(84, 176, 226, 0.08), transparent 68%);
+}
+
+/* Selective Glass Surfaces: Navigation, Modals, Sticky Toolbars, Hero & Featured Cards */
+html.glass-mode:not(.performance-mode) .wwcf-glass-header,
+html.glass-mode:not(.performance-mode) .wwcf-glass-sidebar,
+html.glass-mode:not(.performance-mode) .wwcf-glass-modal,
+html.glass-mode:not(.performance-mode) .wwcf-toolbar-sticky,
+html.glass-mode:not(.performance-mode) .wwcf-surface-hero,
+html.glass-mode:not(.performance-mode) .wwcf-glass-featured {
+  backdrop-filter: blur(var(--glass-blur, 10px)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 10px)) saturate(1.15);
+}
+
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-surface-hero,
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-glass-featured {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-surface-hero,
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-glass-featured {
+  background-color: rgba(12, 17, 26, 0.68);
+}
+
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-surface-hero,
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-glass-featured {
+  background-color: rgba(6, 9, 14, 0.68);
+}
+
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-glass-card,
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-glass-modal,
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-toolbar-sticky,
+html.glass-mode:not(.dark):not(.performance-mode) .wwcf-surface-hero {
+  box-shadow: 0 8px 26px -8px rgba(15, 23, 42, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.82);
+}
+
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-glass-card,
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-glass-modal,
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-toolbar-sticky,
+html.dark.glass-mode:not(.amoled):not(.performance-mode) .wwcf-surface-hero {
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.68), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-glass-card,
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-glass-modal,
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-toolbar-sticky,
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-surface-hero {
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.88), inset 0 1px 0 0 rgba(140, 203, 237, 0.14);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html.glass-mode:not(.dark):not(.performance-mode) {
+    --glass-header: rgba(255, 255, 255, 0.96);
+    --glass-sidebar: rgba(255, 255, 255, 0.96);
+    --glass-card: rgba(255, 255, 255, 0.96);
+    --glass-modal: rgba(255, 255, 255, 0.98);
+    --glass-toolbar: rgba(255, 255, 255, 0.96);
+  }
+  html.dark.glass-mode:not(.amoled):not(.performance-mode) {
+    --glass-header: rgba(10, 14, 21, 0.96);
+    --glass-sidebar: rgba(7, 10, 16, 0.96);
+    --glass-card: rgba(12, 17, 26, 0.96);
+    --glass-modal: rgba(15, 21, 31, 0.98);
+    --glass-toolbar: rgba(10, 14, 21, 0.96);
+  }
+  html.dark.amoled.glass-mode:not(.performance-mode) {
+    --glass-header: rgba(4, 6, 10, 0.96);
+    --glass-sidebar: rgba(2, 4, 8, 0.96);
+    --glass-card: rgba(6, 9, 14, 0.96);
+    --glass-modal: rgba(8, 11, 16, 0.98);
+    --glass-toolbar: rgba(4, 6, 10, 0.96);
+  }
+}
+
+.wwcf-input {
+  background-color: var(--surface-2);
+  border: 1px solid var(--wwcf-border);
+  border-radius: 0.75rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.wwcf-input:focus {
+  outline: none;
+  border-color: #1b75bc;
+  box-shadow: 0 0 0 3px rgba(27, 117, 188, 0.16);
+}
+.dark .wwcf-input:focus {
+  border-color: #54b0e2;
+  box-shadow: 0 0 0 3px rgba(84, 176, 226, 0.2);
+}
+
+.tabular-nums-data {
+  font-variant-numeric: tabular-nums;
 }
 
 .wwcf-interactive-row {
@@ -814,6 +1000,141 @@ html.reading-mode span,
 html.reading-mode li {
   line-height: 1.65 !important;
 }
+
+/* ==========================================================================
+   True-Black Full-Color AMOLED Mode (html.dark.amoled)
+   Active when Dark Mode + AMOLED are both ON.
+   Expands true #000000 OLED canvas and primary card/shell base surfaces while
+   preserving WWCF brand blue (#1b75bc / #54b0e2), semantic/status colors,
+   readable text hierarchy, chart pigments, SVG icons, borders, depth, and
+   compatible frosted Glass Mode when enabled.
+   ========================================================================== */
+html.dark.amoled {
+  --surface-0: #000000;
+  --surface-1: #000000;
+  --surface-2: #000000;
+  --surface-3: #000000;
+  --surface-4: #0d131c;
+
+  --glass-header: #000000;
+  --glass-sidebar: #000000;
+  --glass-card: #000000;
+  --glass-modal: #000000;
+  --glass-toolbar: #000000;
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --wwcf-border: rgba(255, 255, 255, 0.14);
+  --wwcf-border-strong: rgba(255, 255, 255, 0.24);
+
+  /* Shift slate base tokens to #000000 while keeping 850/800/750/700/600 neutral-slate for borders, dividers & switch tracks */
+  --color-slate-950: #000000;
+  --color-slate-900: #000000;
+  --color-slate-850: #11161e;
+  --color-slate-800: #1d2633;
+  --color-slate-750: #242f3f;
+  --color-slate-700: #2f3b4e;
+  --color-slate-600: #3f4d63;
+
+  background-color: #000000 !important;
+  color: #FFFFFF;
+  color-scheme: dark;
+}
+
+html.dark.amoled body {
+  background-color: #000000 !important;
+  color: #FFFFFF;
+}
+
+html.dark.amoled .wwcf-app-shell {
+  background-color: #000000;
+}
+
+html.dark.amoled .wwcf-surface-hero {
+  background-color: var(--surface-1);
+  box-shadow: 0 2px 10px 0 rgba(0, 0, 0, 0.75);
+}
+
+html.dark.amoled .wwcf-glass-card {
+  background-color: var(--glass-card);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.65);
+}
+
+html.dark.amoled .wwcf-glass-modal {
+  background-color: var(--glass-modal);
+}
+
+html.dark.amoled .wwcf-toolbar-sticky {
+  background-color: var(--glass-toolbar, #000000);
+}
+
+/* Broad dark-slate / hardcoded dark-hex containers & panels resolve to true OLED #000000 in AMOLED
+   while keeping borders, WWCF brand blue (#1b75bc / #54b0e2), semantic badges, icons, and text intact */
+html.dark.amoled :is(
+  .dark\:bg-\[\#11161e\],
+  .dark\:bg-\[\#0b0e13\],
+  .dark\:bg-\[\#0b0e13\]\/60,
+  .dark\:bg-\[\#0b0e13\]\/70,
+  .dark\:bg-slate-950,
+  .dark\:bg-slate-900,
+  .dark\:bg-slate-900\/30,
+  .dark\:bg-slate-900\/40,
+  .dark\:bg-slate-900\/50,
+  .dark\:bg-slate-900\/60,
+  .dark\:bg-slate-900\/70,
+  .dark\:bg-slate-900\/80,
+  .dark\:bg-slate-900\/90,
+  .dark\:bg-slate-850,
+  .dark\:bg-slate-850\/40,
+  .dark\:bg-slate-850\/60,
+  .dark\:bg-slate-800,
+  .dark\:bg-slate-800\/30,
+  .dark\:bg-slate-800\/40,
+  .dark\:bg-slate-800\/50,
+  .dark\:bg-slate-800\/60,
+  .dark\:bg-slate-800\/70,
+  .dark\:bg-slate-800\/80,
+  .dark\:bg-white\/\[0\.02\],
+  .dark\:bg-white\/\[0\.03\]
+):not([data-wwcf-export-surface="true"]):not([data-wwcf-export-surface="true"] *) {
+  background-color: #000000;
+}
+
+/* When Glass Mode IS active in AMOLED (and Performance Mode is OFF), keep inner modal chrome translucent
+   so .wwcf-glass-modal's frosted blur flows seamlessly through headers, sections, and footers */
+html.dark.amoled.glass-mode:not(.performance-mode) .wwcf-glass-modal :is(
+  .dark\:bg-slate-900\/50,
+  .dark\:bg-slate-900\/60,
+  .dark\:bg-slate-850\/40,
+  .dark\:bg-slate-850\/60,
+  .dark\:bg-slate-800\/30,
+  .dark\:bg-slate-800\/40,
+  .dark\:bg-slate-800\/50,
+  .dark\:bg-slate-800\/60,
+  .dark\:bg-white\/\[0\.03\]
+) {
+  background-color: rgba(0, 0, 0, 0.28);
+}
+
+/* Ensure AMOLED true-black base surfaces in non-glass modals & cards revert to #000000 when Glass OFF or Perf Mode ON */
+html.dark.amoled.performance-mode :is(
+  .dark\:bg-slate-900\/50,
+  .dark\:bg-slate-900\/60,
+  .dark\:bg-slate-850\/40,
+  .dark\:bg-slate-850\/60,
+  .dark\:bg-slate-800\/30,
+  .dark\:bg-slate-800\/40,
+  .dark\:bg-slate-800\/50,
+  .dark\:bg-slate-800\/60,
+  .dark\:bg-white\/\[0\.03\]
+) {
+  background-color: #000000;
+}
+
+/* Re-assert pure light export/print surface integrity even when AMOLED is active */
+html.dark.amoled [data-wwcf-export-surface="true"],
+html.dark.amoled [data-wwcf-export-surface="true"] * {
+  color-scheme: light;
+}
+
 
 
 

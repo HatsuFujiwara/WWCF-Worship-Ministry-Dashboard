@@ -458,7 +458,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
         className={`p-5 rounded-xl border text-center text-xs ${
           isStage
             ? 'bg-white/5 border-white/10 text-white/60'
-            : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'
+            : 'bg-slate-50 dark:bg-[#0b0e13] border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
         }`}
       >
         No instrument chord or cue charts are attached to this song yet.
@@ -472,7 +472,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
       {usableCharts.length > 0 && (
         <div
           className={`flex flex-wrap items-center gap-1.5 pb-2 border-b ${
-            isStage ? 'border-white/10' : 'border-slate-200 dark:border-slate-800'
+            isStage ? 'border-white/10' : 'border-slate-200 dark:border-white/10'
           }`}
           role="tablist"
           aria-label="Instrument chart variants"
@@ -493,12 +493,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                   setSelectedIndex(idx);
                   onPreferredInstrumentChange?.(variant.instrument);
                 }}
-                className={`px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer border focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   isActive
                     ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
                     : isStage
                     ? 'bg-white/5 text-white/75 border-white/10 hover:bg-white/15 hover:text-white'
-                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    : 'bg-white dark:bg-[#11161e] text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'
                 }`}
               >
                 {labelText}
@@ -513,7 +513,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
         className={`p-3 rounded-xl border space-y-2.5 ${
           isStage
             ? 'bg-white/5 border-white/10 text-white'
-            : 'bg-slate-50 dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100'
+            : 'bg-slate-50/90 dark:bg-[#0b0e13] border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100'
         }`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -528,20 +528,24 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                   className={`inline-flex items-center rounded-lg border ${
                     isStage
                       ? 'border-white/15 bg-black/50'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      : 'border-slate-200 dark:border-white/10 bg-white dark:bg-[#11161e]'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={() => setSemitones((s) => Math.max(-11, s - 1))}
                     aria-label="Transpose down one semitone"
-                    className={`p-1.5 min-w-[34px] min-h-[34px] flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-l-lg ${
-                      isStage ? 'hover:bg-white/10 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                    className={`p-1.5 min-w-[34px] min-h-[34px] flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-l-lg ${
+                      isStage ? 'hover:bg-white/10 text-white' : 'hover:bg-slate-100 dark:hover:bg-white/5'
                     }`}
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="px-2 text-xs font-bold tabular-nums min-w-[54px] text-center text-[#1b75bc] dark:text-[#54b0e2] whitespace-nowrap">
+                  <span
+                    className={`px-2 text-xs font-bold tabular-nums min-w-[54px] text-center whitespace-nowrap ${
+                      isStage ? 'text-[#54b0e2]' : 'text-[#1b75bc] dark:text-[#54b0e2]'
+                    }`}
+                  >
                     {soundedKey || (semitones === 0 ? 'Orig' : `${semitones > 0 ? '+' : ''}${semitones}`)}
                     {soundedKey && semitones !== 0 ? ` (${semitones > 0 ? '+' : ''}${semitones})` : ''}
                   </span>
@@ -549,8 +553,8 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                     type="button"
                     onClick={() => setSemitones((s) => Math.min(11, s + 1))}
                     aria-label="Transpose up one semitone"
-                    className={`p-1.5 min-w-[34px] min-h-[34px] flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-r-lg ${
-                      isStage ? 'hover:bg-white/10 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                    className={`p-1.5 min-w-[34px] min-h-[34px] flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-r-lg ${
+                      isStage ? 'hover:bg-white/10 text-white' : 'hover:bg-slate-100 dark:hover:bg-white/5'
                     }`}
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -561,10 +565,10 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                     type="button"
                     onClick={() => setSemitones(autoAlignedSemitones)}
                     title="Reset transpose to default key"
-                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-md text-[11px] font-medium cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-md text-[11px] font-medium cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                       isStage
                         ? 'bg-white/10 hover:bg-white/20 text-white/80'
-                        : 'bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                        : 'bg-slate-200/70 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/15 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     <RotateCcw className="w-3 h-3" />
@@ -589,7 +593,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                   className={`inline-flex items-center rounded-lg border ${
                     isStage
                       ? 'border-white/15 bg-black/50'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      : 'border-slate-200 dark:border-white/10 bg-white dark:bg-[#11161e]'
                   }`}
                 >
                   <button
@@ -597,7 +601,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                     onClick={() => setCapo((c) => Math.max(0, c - 1))}
                     disabled={capo === 0}
                     aria-label="Decrease capo fret"
-                    className="p-1.5 min-w-[32px] min-h-[34px] flex items-center justify-center cursor-pointer disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-l-lg"
+                    className="p-1.5 min-w-[32px] min-h-[34px] flex items-center justify-center cursor-pointer disabled:opacity-35 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-l-lg"
                   >
                     <Minus className="w-3 h-3" />
                   </button>
@@ -609,13 +613,17 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                     onClick={() => setCapo((c) => Math.min(12, c + 1))}
                     disabled={capo >= 12}
                     aria-label="Increase capo fret"
-                    className="p-1.5 min-w-[32px] min-h-[34px] flex items-center justify-center cursor-pointer disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-r-lg"
+                    className="p-1.5 min-w-[32px] min-h-[34px] flex items-center justify-center cursor-pointer disabled:opacity-35 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] rounded-r-lg"
                   >
                     <Plus className="w-3 h-3" />
                   </button>
                 </div>
                 {shapeKey && (
-                  <span className="text-[11px] font-semibold text-[#1b75bc] dark:text-[#54b0e2] whitespace-nowrap">
+                  <span
+                    className={`text-[11px] font-semibold whitespace-nowrap ${
+                      isStage ? 'text-[#54b0e2]' : 'text-[#1b75bc] dark:text-[#54b0e2]'
+                    }`}
+                  >
                     Play {shapeKey} shapes
                   </span>
                 )}
@@ -634,12 +642,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                     ? 'Toggle Nashville Number System (1-4-5) chart notation'
                     : 'Set an original, chart, or performed key to enable Nashville numbers'
                 }
-                className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   nashvilleMode
                     ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
                     : isStage
                     ? 'bg-white/5 text-white/80 border-white/15 hover:bg-white/15'
-                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    : 'bg-white dark:bg-[#11161e] text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'
                 }`}
               >
                 <Hash className="w-3.5 h-3.5" />
@@ -657,12 +665,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                   type="button"
                   aria-pressed={fontSize === sz}
                   onClick={() => setFontSize(sz)}
-                  className={`px-2 py-1 min-w-[32px] min-h-[34px] rounded-md text-[11px] font-bold uppercase cursor-pointer border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                  className={`px-2 py-1 min-w-[32px] min-h-[34px] rounded-md text-[11px] font-bold uppercase cursor-pointer border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                     fontSize === sz
                       ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
                       : isStage
                       ? 'bg-white/5 text-white/70 border-white/10 hover:bg-white/15'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      : 'bg-white dark:bg-[#11161e] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'
                   }`}
                 >
                   {sz}
@@ -674,14 +682,14 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               type="button"
               onClick={handleCopyChart}
               title="Copy formatted transposed chart to clipboard"
-              className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[34px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[34px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                 copiedState === 'copied'
                   ? 'bg-emerald-600 text-white border-emerald-600'
                   : copiedState === 'failed'
                   ? 'bg-amber-600 text-white border-amber-600'
                   : isStage
                   ? 'bg-white/5 text-white/80 border-white/15 hover:bg-white/15'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'bg-white dark:bg-[#11161e] text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'
               }`}
             >
               {copiedState === 'copied' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -699,7 +707,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
         {/* Auto-Scroll Row (Phase 2) */}
         <div
           className={`pt-2 border-t flex flex-wrap items-center justify-between gap-2 ${
-            isStage ? 'border-white/10' : 'border-slate-200/80 dark:border-slate-800'
+            isStage ? 'border-white/10' : 'border-slate-200/80 dark:border-white/10'
           }`}
         >
           <div className="flex flex-wrap items-center gap-1.5">
@@ -711,7 +719,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               <button
                 type="button"
                 onClick={handlePauseAutoScroll}
-                className="inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold bg-amber-500 hover:bg-amber-600 text-black transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+                className="inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold bg-amber-500 hover:bg-amber-600 text-black transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
               >
                 <Pause className="w-3 h-3" />
                 <span>Pause</span>
@@ -728,12 +736,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                       : 'Start chart auto-scroll'
                     : 'Chart fits within view — no scrolling needed'
                 }
-                className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   autoScrollState === 'paused'
                     ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
                     : isStage
                     ? 'bg-white/10 hover:bg-white/20 text-white border-white/15'
-                    : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                    : 'bg-white dark:bg-[#11161e] hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-white/10'
                 }`}
               >
                 <Play className="w-3 h-3" />
@@ -745,10 +753,10 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               <button
                 type="button"
                 onClick={handleStopAutoScroll}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   isStage
                     ? 'bg-white/5 hover:bg-white/15 text-white/80 border-white/15'
-                    : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                    : 'bg-white dark:bg-[#11161e] hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10'
                 }`}
               >
                 <Square className="w-3 h-3" />
@@ -761,10 +769,10 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               disabled={!isChartScrollable}
               onClick={handleScrollToTop}
               title="Scroll back to top of chart"
-              className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-md text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                 isStage
                   ? 'bg-white/5 hover:bg-white/15 text-white/80 border-white/15'
-                  : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  : 'bg-white dark:bg-[#11161e] hover:bg-slate-100 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10'
               }`}
             >
               <ArrowUpToLine className="w-3 h-3" />
@@ -782,12 +790,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                 type="button"
                 aria-pressed={autoScrollSpeed === opt.key}
                 onClick={() => handleChangeAutoScrollSpeed(opt.key)}
-                className={`px-2 py-1 min-w-[34px] min-h-[30px] rounded-md text-[11px] font-semibold tabular-nums border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`px-2 py-1 min-w-[34px] min-h-[30px] rounded-md text-[11px] font-semibold tabular-nums border transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   autoScrollSpeed === opt.key
                     ? 'bg-[#1b75bc] text-white border-[#1b75bc]'
                     : isStage
                     ? 'bg-white/5 text-white/75 border-white/10 hover:bg-white/15'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    : 'bg-white dark:bg-[#11161e] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'
                 }`}
               >
                 {opt.label}
@@ -819,7 +827,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               <button
                 type="button"
                 onClick={() => manualCopyTextareaRef.current?.select()}
-                className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#1b75bc] text-white hover:bg-[#165d97] cursor-pointer whitespace-nowrap"
+                className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#1b75bc] text-white hover:bg-[#165d97] cursor-pointer whitespace-nowrap focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
               >
                 Select All
               </button>
@@ -830,8 +838,8 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                   setCopiedState('idle');
                 }}
                 aria-label="Close manual copy box"
-                className={`p-1 rounded-md cursor-pointer ${
-                  isStage ? 'text-white/70 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-800'
+                className={`p-1 rounded-md cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                  isStage ? 'text-white/70 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/70 dark:hover:bg-white/10'
                 }`}
               >
                 <X className="w-3.5 h-3.5" />
@@ -845,10 +853,10 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
             rows={5}
             onFocus={(e) => e.currentTarget.select()}
             aria-label="Formatted chart text for manual copying"
-            className={`w-full p-2.5 rounded-lg border font-mono text-xs outline-none ${
+            className={`w-full p-2.5 rounded-lg border font-mono text-xs outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
               isStage
                 ? 'bg-black border-white/15 text-white'
-                : 'bg-white dark:bg-black border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200'
             }`}
           />
         </div>
@@ -863,7 +871,15 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
         {hasExplicitPerformedKeyContext && (
           <span>
             Performed Key:{' '}
-            <strong className={targetPerformedKey ? 'text-[#54b0e2]' : 'italic font-medium opacity-75'}>
+            <strong
+              className={
+                targetPerformedKey
+                  ? isStage
+                    ? 'text-[#54b0e2]'
+                    : 'text-[#1b75bc] dark:text-[#54b0e2]'
+                  : 'italic font-medium opacity-75'
+              }
+            >
               {targetPerformedKey || 'Performed key not set'}
             </strong>
           </span>
@@ -896,12 +912,12 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
                 key={sec.id}
                 type="button"
                 onClick={() => handleJumpToSection(sec.id)}
-                className={`px-2.5 py-1 min-h-[30px] rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap cursor-pointer border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+                className={`px-2.5 py-1 min-h-[30px] rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap cursor-pointer border focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
                   isSelected
                     ? 'bg-[#1b75bc]/15 text-[#1b75bc] dark:text-[#54b0e2] border-[#1b75bc]/40'
                     : isStage
                     ? 'bg-white/5 text-white/75 border-white/10 hover:bg-white/15 hover:text-white'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-[#1b75bc]/40'
+                    : 'bg-white dark:bg-[#11161e] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-[#1b75bc]/40'
                 }`}
               >
                 {sec.label}
@@ -921,10 +937,10 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
         onTouchStart={pauseOnManualInteraction}
         onPointerDown={pauseOnManualInteraction}
         onKeyDown={handleContainerKeyDown}
-        className={`${maxHeightClass} overflow-y-auto rounded-xl border p-4 space-y-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
+        className={`${maxHeightClass} overflow-y-auto rounded-xl border p-4 space-y-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] ${
           isStage
             ? 'bg-[#080808] border-white/10 text-white'
-            : 'bg-white dark:bg-black border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100'
+            : 'bg-white dark:bg-[#000000] border-slate-200 dark:border-white/10 text-slate-900 dark:text-slate-100'
         }`}
       >
         {sections.map((sec) => (
@@ -939,7 +955,7 @@ export const ChordChartViewer: React.FC<ChordChartViewerProps> = ({
               className={`text-xs font-bold tracking-wide pb-1 border-b ${
                 isStage
                   ? 'text-[#54b0e2] border-white/10'
-                  : 'text-[#1b75bc] dark:text-[#54b0e2] border-slate-100 dark:border-slate-800'
+                  : 'text-[#1b75bc] dark:text-[#54b0e2] border-slate-100 dark:border-white/10'
               }`}
             >
               {sec.label}

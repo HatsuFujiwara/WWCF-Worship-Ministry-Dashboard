@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Member, Schedule, ActiveTab, formatAssignmentMemberNames, ServiceType, Song, normalizeServiceType } from '../types';
+import { Member, Schedule, ActiveTab, formatAssignmentMemberNames, ServiceType, Song, SongFamily, normalizeServiceType } from '../types';
 import {
   formatDateDisplayManila,
   getManilaTodayString,
@@ -20,7 +20,6 @@ import {
   ArrowRight,
   Flame,
   Clock,
-  Sparkles,
   BookmarkCheck,
   Calendar
 } from 'lucide-react';
@@ -29,6 +28,7 @@ interface DashboardViewProps {
   members: Member[];
   schedules: Schedule[];
   allSongs?: Song[];
+  songFamilies?: SongFamily[];
   setActiveTab: (tab: ActiveTab) => void;
   onEditSchedule: (schedule: Schedule) => void;
   onUpdateSchedules?: (updated: Schedule[]) => void;
@@ -38,6 +38,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   members,
   schedules,
   allSongs = [],
+  songFamilies = [],
   setActiveTab,
   onEditSchedule,
   onUpdateSchedules,
@@ -153,10 +154,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(set);
   }, [currentMonthSchedules, schedules]);
 
-  // Calculate comprehensive song and song leader analytics
+  // Calculate comprehensive song and song leader analytics (ID-authoritative + Song Family aware)
   const songAnalytics = useMemo(() => {
-    return calculateSongAnalytics(schedules, members);
-  }, [schedules, members]);
+    return calculateSongAnalytics(schedules, members, allSongs, songFamilies);
+  }, [schedules, members, allSongs, songFamilies]);
 
   // Most Used Songs: Filter to songs played at least twice (playCount >= 2) before taking top results
   const topSongs = useMemo(() => {
@@ -230,17 +231,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ========================================================================= */}
       {/* 1. PRIMARY WORKSPACE HERO: NEXT SCHEDULED WORSHIP SERVICE                */}
       {/* ========================================================================= */}
-      <div className="relative overflow-hidden rounded-2xl wwcf-surface-hero p-6 sm:p-8 transition-all">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-3 max-w-2xl">
+      <div className="relative overflow-hidden rounded-2xl wwcf-surface-hero p-5 sm:p-6 transition-all !border-l-4 !border-l-[#1b75bc]">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+          <div className="space-y-2.5 max-w-2xl min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#1b75bc] dark:text-[#54b0e2]">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#1b75bc] dark:text-[#54b0e2]">
                 Next Worship Service
               </span>
 
               {upcomingSchedule && (
                 <>
-                  <span className="text-slate-300 dark:text-slate-700">·</span>
+                  <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
                   <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                     {upcomingSchedule.serviceDate === todayManila
                       ? 'Today'
@@ -253,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <div>
-              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 {upcomingSchedule
                   ? formatDateDisplayManila(upcomingSchedule.serviceDate, {
                       weekday: 'long',
@@ -263,15 +264,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     })
                   : 'No Upcoming Service Scheduled'}
               </h2>
-              <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                <span className="font-bold text-slate-700 dark:text-slate-300">
+              <div className="flex flex-wrap items-center gap-2.5 mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">
                   {upcomingSchedule?.serviceType || 'Sunday Service'}
                 </span>
-                <span>•</span>
+                <span aria-hidden="true">•</span>
                 {upcomingDetails?.isNoService ? (
-                  <span>Status: <strong className="text-rose-600 dark:text-rose-400">No Service</strong></span>
+                  <span>Status: <strong className="text-rose-600 dark:text-rose-400 font-semibold">No Service</strong></span>
                 ) : (
-                  <span>Song Leaders: <strong className="text-slate-800 dark:text-slate-200">{upcomingDetails?.leaderNames || 'Pending'}</strong></span>
+                  <span>Song Leaders: <strong className="text-slate-800 dark:text-slate-200 font-semibold">{upcomingDetails?.leaderNames || 'Pending'}</strong></span>
                 )}
               </div>
             </div>
@@ -279,20 +280,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Readiness Summary Banner */}
             <div className="flex items-center gap-3 pt-1">
               {upcomingDetails?.isNoService ? (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 text-xs font-semibold">
                   <Ban className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>
                     No Service Scheduled{upcomingDetails.noServiceReason ? ` — ${upcomingDetails.noServiceReason}` : ''}
                   </span>
                 </div>
               ) : upcomingDetails?.isEmpty ? (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
-                  <CalendarX className="w-4 h-4" aria-hidden="true" />
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 text-xs font-semibold">
+                  <CalendarX className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>Lineup Not Started (0 Songs Added)</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
-                  <BookmarkCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 text-xs font-semibold tabular-nums">
+                  <BookmarkCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
                   <span>
                     Lineup Prepared: {upcomingDetails?.totalSongs} Songs ({upcomingDetails?.praiseCount} Praise, {upcomingDetails?.worshipCount} Worship)
                   </span>
@@ -307,7 +308,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleLineupClick(upcomingSchedule)}
-                className="btn-tactile inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] text-white text-sm font-bold shadow-md shadow-[#1b75bc]/25 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+                className="btn-tactile inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[42px] rounded-xl bg-[#1b75bc] hover:bg-[#165d97] active:bg-[#144d7c] text-white text-sm font-semibold shadow-sm shadow-[#1b75bc]/20 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
               >
                 <span>
                   {upcomingDetails?.isNoService
@@ -324,7 +325,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="button"
               onClick={() => setActiveTab('scheduler')}
               data-tour="create-lineup-btn"
-              className="btn-tactile inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 text-xs font-bold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
+              className="btn-tactile inline-flex items-center justify-center gap-2 px-4 py-2 min-h-[38px] rounded-xl bg-slate-100/90 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
             >
               <Plus className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
               <span>Create Another Service</span>
@@ -334,91 +335,81 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. COMPACT MINISTRY METRIC BAR (NO EXCESSIVE ISOLATED CARDS)              */}
+      {/* 2. WORKSPACE SUMMARY METRICS                                              */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div data-tour="dashboard-saved-card" className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-            <BookmarkCheck className="w-5 h-5" />
+        <div data-tour="dashboard-saved-card" className="p-4 rounded-2xl wwcf-glass-card wwcf-glass-featured flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Saved Lineups</span>
+            <BookmarkCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Saved</p>
-            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalSavedLineups}</h4>
-          </div>
+          <h4 className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">{totalSavedLineups}</h4>
         </div>
 
-        <div data-tour="dashboard-empty-card" className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-            <CalendarX className="w-5 h-5" />
+        <div data-tour="dashboard-empty-card" className="p-4 rounded-2xl wwcf-glass-card wwcf-glass-featured flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Empty Slots</span>
+            <CalendarX className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Empty</p>
-            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalEmptyLineups}</h4>
-          </div>
+          <h4 className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">{totalEmptyLineups}</h4>
         </div>
 
-        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-            <Ban className="w-5 h-5" />
+        <div className="p-4 rounded-2xl wwcf-glass-card wwcf-glass-featured flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">No Service</span>
+            <Ban className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">No Service</p>
-            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalNoServiceLineups}</h4>
-          </div>
+          <h4 className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">{totalNoServiceLineups}</h4>
         </div>
 
-        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
-            <Users className="w-5 h-5" />
+        <div className="p-4 rounded-2xl wwcf-glass-card wwcf-glass-featured flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Team Roster</span>
+            <Users className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" aria-hidden="true" />
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Team Roster</p>
-            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{members.length}</h4>
-          </div>
+          <h4 className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">{members.length}</h4>
         </div>
 
-        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs flex items-center gap-3 col-span-2 sm:col-span-1">
-          <div className="w-10 h-10 rounded-xl bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0">
-            <Music className="w-5 h-5" />
+        <div className="p-4 rounded-2xl wwcf-glass-card wwcf-glass-featured flex flex-col justify-between gap-2 col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Active Songs</span>
+            <Music className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" aria-hidden="true" />
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Active Songs</p>
-            <h4 className="text-xl font-black text-slate-900 dark:text-slate-100 tabular-nums">{totalUniqueSongs}</h4>
-          </div>
+          <h4 className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">{totalUniqueSongs}</h4>
         </div>
       </div>
 
       {/* Dedicated Service Line-up Cards (Sunday & Midweek) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Service Line-up Status
           </h3>
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
             {currentMonthLabel}
           </span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Sunday Service Card */}
-          <div data-tour="dashboard-sunday-card" className="p-5 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3">
+          <div data-tour="dashboard-sunday-card" className="p-5 rounded-2xl wwcf-glass-card wwcf-glass-featured space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3 gap-2">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8]" />
+                <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
                 <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                   Sunday Service
                 </h3>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold tabular-nums">
                 <span className="text-emerald-700 dark:text-emerald-400">
                   {sundaySaved.length} Saved
                 </span>
-                <span className="text-slate-300 dark:text-slate-700">·</span>
+                <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
                 <span className="text-amber-700 dark:text-amber-400">
                   {sundayEmpty.length} Empty
                 </span>
                 {sundayNoService.length > 0 && (
                   <>
-                    <span className="text-slate-300 dark:text-slate-700">·</span>
+                    <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
                     <span className="text-rose-700 dark:text-rose-400">
                       {sundayNoService.length} No Service
                     </span>
@@ -430,14 +421,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Saved Sunday Section */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-                    <BookmarkCheck className="w-3.5 h-3.5" />
-                    Saved ({sundaySaved.length})
-                  </span>
+                <h4 className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <BookmarkCheck className="w-3.5 h-3.5" />
+                  <span>Saved ({sundaySaved.length})</span>
                 </h4>
                 {sundaySaved.length === 0 ? (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-2 py-1">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-1 py-1">
                     No saved Sunday lineups this month
                   </p>
                 ) : (
@@ -450,13 +439,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleLineupClick(schedule)}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between group cursor-pointer"
+                            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-emerald-50/80 dark:hover:bg-emerald-950/35 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between group cursor-pointer"
                           >
-                            <span className="font-semibold flex items-center gap-1.5">
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
+                            <span className="font-semibold flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-xs text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
+                            <span className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-emerald-700 dark:group-hover:text-emerald-400 font-semibold tabular-nums shrink-0">
                               {songCount} {songCount === 1 ? 'song' : 'songs'}
                             </span>
                           </button>
@@ -469,14 +458,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* Empty Sunday Section */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-                    <CalendarX className="w-3.5 h-3.5" />
-                    Empty ({sundayEmpty.length})
-                  </span>
+                <h4 className="text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                  <CalendarX className="w-3.5 h-3.5" />
+                  <span>Empty ({sundayEmpty.length})</span>
                 </h4>
                 {sundayEmpty.length === 0 ? (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-2 py-1">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-1 py-1">
                     No empty Sunday lineups this month
                   </p>
                 ) : (
@@ -487,13 +474,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleLineupClick(schedule)}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50/80 dark:hover:bg-amber-950/40 text-xs text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-between group cursor-pointer"
+                            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50/80 dark:hover:bg-amber-950/35 text-xs text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-between group cursor-pointer"
                           >
-                            <span className="font-semibold flex items-center gap-1.5">
-                              <span className="text-amber-500 dark:text-amber-400 font-bold">•</span>
+                            <span className="font-semibold flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-xs text-amber-600 dark:text-amber-400 font-bold opacity-90 group-hover:opacity-100 shrink-0">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold opacity-90 group-hover:opacity-100 shrink-0">
                               + Add songs
                             </span>
                           </button>
@@ -507,7 +494,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {sundayNoService.length > 0 && (
               <div className="pt-3 border-t border-slate-100 dark:border-white/10 space-y-2">
-                <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                <h4 className="text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
                   <Ban className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>No Service ({sundayNoService.length})</span>
                 </h4>
@@ -517,7 +504,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleLineupClick(schedule)}
-                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
+                        className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-50/80 dark:hover:bg-rose-950/35 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
                       >
                         <span className="font-semibold flex items-center gap-1.5 shrink-0">
                           <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
@@ -535,25 +522,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Midweek Prayer Service Card */}
-          <div data-tour="dashboard-midweek-card" className="p-5 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3">
+          <div data-tour="dashboard-midweek-card" className="p-5 rounded-2xl wwcf-glass-card wwcf-glass-featured space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3 gap-2">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8]" />
+                <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
                 <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                   Midweek Prayer Service
                 </h3>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold tabular-nums">
                 <span className="text-emerald-700 dark:text-emerald-400">
                   {midweekSaved.length} Saved
                 </span>
-                <span className="text-slate-300 dark:text-slate-700">·</span>
+                <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
                 <span className="text-amber-700 dark:text-amber-400">
                   {midweekEmpty.length} Empty
                 </span>
                 {midweekNoService.length > 0 && (
                   <>
-                    <span className="text-slate-300 dark:text-slate-700">·</span>
+                    <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
                     <span className="text-rose-700 dark:text-rose-400">
                       {midweekNoService.length} No Service
                     </span>
@@ -565,14 +552,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Saved Midweek Section */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-                    <BookmarkCheck className="w-3.5 h-3.5" />
-                    Saved ({midweekSaved.length})
-                  </span>
+                <h4 className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <BookmarkCheck className="w-3.5 h-3.5" />
+                  <span>Saved ({midweekSaved.length})</span>
                 </h4>
                 {midweekSaved.length === 0 ? (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-2 py-1">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-1 py-1">
                     No saved Midweek lineups this month
                   </p>
                 ) : (
@@ -585,13 +570,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleLineupClick(schedule)}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between group cursor-pointer"
+                            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-emerald-50/80 dark:hover:bg-emerald-950/35 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between group cursor-pointer"
                           >
-                            <span className="font-semibold flex items-center gap-1.5">
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
+                            <span className="font-semibold flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-xs text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold shrink-0">
+                            <span className="text-xs text-slate-500 dark:text-slate-400 group-hover:text-emerald-700 dark:group-hover:text-emerald-400 font-semibold tabular-nums shrink-0">
                               {songCount} {songCount === 1 ? 'song' : 'songs'}
                             </span>
                           </button>
@@ -604,14 +589,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* Empty Midweek Section */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-                    <CalendarX className="w-3.5 h-3.5" />
-                    Empty ({midweekEmpty.length})
-                  </span>
+                <h4 className="text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                  <CalendarX className="w-3.5 h-3.5" />
+                  <span>Empty ({midweekEmpty.length})</span>
                 </h4>
                 {midweekEmpty.length === 0 ? (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-2 py-1">
+                  <p className="text-xs text-slate-400 dark:text-slate-500 italic pl-1 py-1">
                     No empty Midweek lineups this month
                   </p>
                 ) : (
@@ -622,13 +605,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleLineupClick(schedule)}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50/80 dark:hover:bg-amber-950/40 text-xs text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-between group cursor-pointer"
+                            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50/80 dark:hover:bg-amber-950/35 text-xs text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-between group cursor-pointer"
                           >
-                            <span className="font-semibold flex items-center gap-1.5">
-                              <span className="text-amber-500 dark:text-amber-400 font-bold">•</span>
+                            <span className="font-semibold flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
                               <span>{formatDateDisplayManila(schedule.serviceDate, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                             </span>
-                            <span className="text-xs text-amber-600 dark:text-amber-400 font-bold opacity-90 group-hover:opacity-100 shrink-0">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold opacity-90 group-hover:opacity-100 shrink-0">
                               + Add songs
                             </span>
                           </button>
@@ -642,7 +625,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {midweekNoService.length > 0 && (
               <div className="pt-3 border-t border-slate-100 dark:border-white/10 space-y-2">
-                <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                <h4 className="text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
                   <Ban className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>No Service ({midweekNoService.length})</span>
                 </h4>
@@ -652,7 +635,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleLineupClick(schedule)}
-                        className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
+                        className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-50/80 dark:hover:bg-rose-950/35 text-xs text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-between gap-2 group cursor-pointer"
                       >
                         <span className="font-semibold flex items-center gap-1.5 shrink-0">
                           <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
@@ -683,25 +666,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             .sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
 
           return (
-            <div key={serviceType} className="p-5 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3">
+            <div key={serviceType} className="p-5 rounded-2xl wwcf-glass-card wwcf-glass-featured space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3 gap-2">
                 <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8]" />
+                  <Calendar className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
                   <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                     {serviceType}
                   </h3>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
-                    Saved ({savedList.length})
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold tabular-nums">
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    {savedList.length} Saved
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
-                    Empty ({emptyList.length})
+                  <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
+                  <span className="text-amber-700 dark:text-amber-400">
+                    {emptyList.length} Empty
                   </span>
                   {noServiceList.length > 0 && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200/60 dark:border-rose-800/60">
-                      No Service ({noServiceList.length})
-                    </span>
+                    <>
+                      <span className="text-slate-300 dark:text-slate-700" aria-hidden="true">·</span>
+                      <span className="text-rose-700 dark:text-rose-400">
+                        {noServiceList.length} No Service
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
@@ -813,15 +800,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Grid: Recent Saved Lineups & Most Used Songs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Lineups (2 cols) */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-3.5">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#1b75bc] dark:text-[#5aa7e8]" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
               <span>Recent Worship Lineups</span>
             </h3>
             <button
+              type="button"
               onClick={() => setActiveTab('schedules')}
-              className="text-xs font-semibold text-[#1b75bc] dark:text-[#5aa7e8] hover:underline flex items-center gap-1 cursor-pointer"
+              className="text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] hover:underline flex items-center gap-1 cursor-pointer"
             >
               <span>View All ({schedules.length})</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -830,8 +818,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="space-y-3">
             {recentSavedSchedules.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl wwcf-glass-card text-slate-500 text-sm">
-                No saved worship lineups with songs yet. Click "Create Service Lineup" to start!
+              <div className="p-8 text-center rounded-2xl wwcf-glass-card text-slate-500 dark:text-slate-400 text-sm">
+                No saved worship lineups with songs yet. Click "Create Another Service" to start!
               </div>
             ) : (
               recentSavedSchedules.map((schedule) => {
@@ -845,37 +833,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 return (
                   <div
                     key={schedule.id}
-                    className="p-5 rounded-2xl wwcf-glass-card wwcf-interactive-row shadow-xs border border-slate-200/80 dark:border-white/10 hover:border-[#1b75bc]/40 dark:hover:border-[#1b75bc]/50 group cursor-pointer"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleLineupClick(schedule)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleLineupClick(schedule);
+                      }
+                    }}
+                    className="p-4 sm:p-5 rounded-2xl wwcf-glass-card wwcf-interactive-row hover:border-[#1b75bc]/40 dark:hover:border-[#54b0e2]/45 group cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc]"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                       <div className="flex items-center gap-2.5">
-                        <span className="px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wide rounded-full bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20">
+                        <span className="px-2.5 py-0.5 text-[11px] font-semibold rounded-lg bg-[#f0f7fc] dark:bg-[#1b75bc]/15 text-[#1b75bc] dark:text-[#54b0e2] border border-[#bce0f5] dark:border-[#1b75bc]/30">
                           {schedule.serviceType}
                         </span>
-                        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                           {formatDateDisplayManila(schedule.serviceDate, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                         </span>
                       </div>
-                      <span className="text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                      <span className="text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
                         <span>Open Lineup</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600 dark:text-slate-300 pt-1">
-                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/5">
-                        <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
-                          <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600 dark:text-slate-300 pt-0.5">
+                      <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-white/[0.03] border border-slate-200/70 dark:border-white/[0.06]">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" aria-hidden="true" />
                           <span>Praise Set</span>
                         </span>
                         <p className="truncate text-slate-600 dark:text-slate-400 font-medium">
                           {resolveScheduleSongTitles(schedule, allSongs).praiseSongs.filter(Boolean).join(' • ') || 'None'}
                         </p>
                       </div>
-                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/5">
-                        <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+                      <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-white/[0.03] border border-slate-200/70 dark:border-white/[0.06]">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
+                          <span className="w-2 h-2 rounded-full bg-[#1b75bc] dark:bg-[#54b0e2] inline-block" aria-hidden="true" />
                           <span>Worship Set</span>
                         </span>
                         <p className="truncate text-slate-600 dark:text-slate-400 font-medium">
@@ -885,11 +881,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
 
                     {Boolean(songLeaderDisplay) && (
-                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/10 text-xs flex items-center justify-between text-slate-400 dark:text-slate-500 font-medium">
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-white/10 text-xs flex items-center justify-between text-slate-500 dark:text-slate-400 font-medium">
                         <span>
-                          Song Leader: <strong className="text-slate-800 dark:text-slate-200">{songLeaderDisplay}</strong>
+                          Song Leader: <strong className="text-slate-800 dark:text-slate-200 font-semibold">{songLeaderDisplay}</strong>
                         </span>
-                        <span className="text-[11px]">{schedule.ministryAssignments.length} Assigned Roles</span>
+                        <span className="text-[11px] tabular-nums">{schedule.ministryAssignments.length} Assigned Roles</span>
                       </div>
                     )}
                   </div>
@@ -900,15 +896,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Most Used Songs (1 col) */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+        <div className="space-y-3.5">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
             <Flame className="w-4 h-4 text-amber-500" />
             <span>Most Used Songs</span>
           </h3>
 
-          <div className="p-5 rounded-2xl wwcf-glass-card shadow-xs">
+          <div className="p-5 rounded-2xl wwcf-glass-card">
             {topSongs.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6">
+              <p className="text-xs text-slate-400 dark:text-slate-500 text-center py-6">
                 No songs have been played more than once yet.
               </p>
             ) : (
@@ -917,14 +913,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div key={item.title} className="py-3 first:pt-0 last:pb-0 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5 min-w-0 pr-1">
-                        <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 font-bold flex items-center justify-center shrink-0 text-[10px]">
+                        <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-white/[0.08] text-slate-600 dark:text-slate-300 font-semibold flex items-center justify-center shrink-0 text-[11px] tabular-nums">
                           {index + 1}
                         </span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                        <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">
                           {item.title}
                         </span>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full bg-[#1b75bc]/10 text-[#1b75bc] dark:text-[#5aa7e8] font-bold shrink-0 text-[11px] border border-[#1b75bc]/20">
+                      <span className="px-2 py-0.5 rounded-lg bg-[#f0f7fc] dark:bg-[#1b75bc]/15 text-[#1b75bc] dark:text-[#54b0e2] font-semibold shrink-0 text-[11px] border border-[#bce0f5] dark:border-[#1b75bc]/30 tabular-nums">
                         {item.totalCount}x
                       </span>
                     </div>
@@ -960,6 +956,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <MemberFavoriteSongsSection
         members={members}
         schedules={schedules}
+        allSongs={allSongs}
+        songFamilies={songFamilies}
         setActiveTab={setActiveTab}
       />
     </div>

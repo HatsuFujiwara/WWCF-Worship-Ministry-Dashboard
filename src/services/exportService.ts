@@ -25,6 +25,7 @@ function formatRoleLabel(role: string): string {
  */
 function createExportElement(schedule: Schedule, allSongs: Song[] = []): HTMLElement {
   const container = document.createElement('div');
+  container.setAttribute('data-wwcf-export-surface', 'true');
   container.style.position = 'fixed';
   container.style.left = '-9999px';
   container.style.top = '-9999px';
@@ -620,6 +621,7 @@ export async function exportLineupAsPDF(schedule: Schedule, allSongs?: Song[]): 
  */
 function createRehearsalSheetElement(schedule: Schedule, allSongs: Song[]): HTMLElement {
   const container = document.createElement('div');
+  container.setAttribute('data-wwcf-export-surface', 'true');
   container.style.position = 'fixed';
   container.style.left = '-9999px';
   container.style.top = '-9999px';
@@ -896,7 +898,6 @@ export async function exportRehearsalSheetAsPDF(schedule: Schedule, allSongs: So
     const imgHeight = totalCanvasHeight * scale;
     pdf.addImage(imgData, 'PNG', margin, margin, printableWidth, imgHeight);
   } else {
-    const ctx = canvas.getContext('2d');
     let currentY = 0;
     let pageIndex = 0;
 

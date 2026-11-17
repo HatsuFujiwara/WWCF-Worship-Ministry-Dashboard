@@ -136,6 +136,11 @@ export function CustomSelect<T extends string = string>({
   };
 
   const isSmall = size === 'sm';
+  const prefersReducedMotion =
+    typeof document !== 'undefined' &&
+    (document.documentElement.classList.contains('reduced-motion') ||
+      document.documentElement.classList.contains('performance-mode') ||
+      (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
 
   return (
     <div
@@ -146,7 +151,7 @@ export function CustomSelect<T extends string = string>({
       {label && (
         <label
           htmlFor={selectId}
-          className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1"
+          className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5"
         >
           {label}
         </label>
@@ -174,16 +179,16 @@ export function CustomSelect<T extends string = string>({
           }
         }}
         onKeyDown={handleKeyDown}
-        className={`w-full flex items-center justify-between gap-2 rounded-lg border text-left font-medium transition-all duration-150 cursor-pointer select-none outline-none btn-press-feedback ${
-          isSmall ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2.5 text-sm'
+        className={`w-full flex items-center justify-between gap-2 rounded-xl border text-left font-medium transition-all duration-150 cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-[#1b75bc]/40 dark:focus-visible:ring-[#54b0e2]/45 ${
+          isSmall ? 'px-3 py-1.5 text-xs min-h-[34px]' : 'px-3.5 py-2.5 text-sm min-h-[42px]'
         } ${
           disabled
-            ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-75'
+            ? 'bg-slate-100 dark:bg-slate-800/70 text-slate-400 dark:text-slate-600 border-slate-200 dark:border-white/10 cursor-not-allowed opacity-75'
             : isSelectedWarning
             ? 'border-rose-300 dark:border-rose-800/80 bg-rose-50/90 dark:bg-rose-950/40 text-rose-950 dark:text-rose-100 ring-1 ring-rose-500/20'
             : isOpen
-            ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
-            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 hover:border-slate-300 dark:hover:border-slate-600'
+            ? 'border-[#1b75bc] dark:border-[#54b0e2] ring-2 ring-[#1b75bc]/20 dark:ring-[#54b0e2]/20 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+            : 'border-slate-200 dark:border-white/10 bg-slate-50/90 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 hover:border-slate-300 dark:hover:border-white/20 hover:bg-white dark:hover:bg-slate-800'
         }`}
       >
         <span className="flex items-center gap-1.5 truncate">
@@ -197,7 +202,7 @@ export function CustomSelect<T extends string = string>({
             {selectedOption ? selectedOption.label : placeholder}
           </span>
           {isSelectedWarning && selectedOption?.warningBadge && (
-            <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+            <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
               {selectedOption.warningBadge}
             </span>
           )}
@@ -207,7 +212,7 @@ export function CustomSelect<T extends string = string>({
             isSelectedWarning
               ? 'text-rose-400 dark:text-rose-500'
               : 'text-slate-400 dark:text-slate-500'
-          } ${isOpen ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''}`}
+          } ${isOpen ? 'rotate-180 text-[#1b75bc] dark:text-[#54b0e2]' : ''}`}
           aria-hidden="true"
         />
       </button>
@@ -220,15 +225,15 @@ export function CustomSelect<T extends string = string>({
             id={listboxId}
             role="listbox"
             tabIndex={-1}
-            initial={{ opacity: 0, y: -4, scale: 0.99 }}
+            initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.99 }}
-            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.99 }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.14, ease: [0.16, 1, 0.3, 1] }}
             aria-activedescendant={
               highlightedIndex >= 0 ? `${selectId}-option-${highlightedIndex}` : undefined
             }
             onKeyDown={handleKeyDown}
-            className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-xl bg-white dark:bg-slate-900 py-1 text-xs sm:text-sm shadow-xl border border-slate-200 dark:border-slate-800 outline-none"
+            className="absolute z-50 mt-1.5 w-full max-h-64 overflow-auto rounded-xl bg-white dark:bg-[#11161e] py-1.5 text-xs sm:text-sm shadow-xl border border-slate-200 dark:border-white/15 outline-none"
           >
             {options.map((option, idx) => {
               const isSelected = option.value === value;
@@ -251,9 +256,9 @@ export function CustomSelect<T extends string = string>({
                         ? 'bg-rose-100/60 dark:bg-rose-950/50 text-rose-950 dark:text-rose-100'
                         : 'bg-rose-50/70 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200'
                       : isSelected
-                      ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-900 dark:text-indigo-200 font-semibold'
+                      ? 'bg-[#f0f7fc] dark:bg-[#1b75bc]/20 text-[#165d97] dark:text-[#8ccbed] font-semibold'
                       : isHighlighted
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                      ? 'bg-slate-100 dark:bg-white/[0.06] text-slate-900 dark:text-slate-100'
                       : 'text-slate-700 dark:text-slate-300'
                   }`}
                 >
@@ -269,13 +274,13 @@ export function CustomSelect<T extends string = string>({
                           {option.label}
                         </span>
                         {option.warningBadge && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                             {option.warningBadge}
                           </span>
                         )}
                       </div>
                       {option.description && (
-                        <p className={`text-[10px] truncate ${option.isWarning ? 'text-rose-700/90 dark:text-rose-300/90 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
+                        <p className={`text-[11px] truncate ${option.isWarning ? 'text-rose-700/90 dark:text-rose-300/90 font-medium' : 'text-slate-500 dark:text-slate-400'}`}>
                           {option.description}
                         </p>
                       )}
@@ -283,7 +288,7 @@ export function CustomSelect<T extends string = string>({
                   </div>
 
                   {isSelected && (
-                    <Check className={`w-3.5 h-3.5 shrink-0 ${option.isWarning ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                    <Check className={`w-3.5 h-3.5 shrink-0 ${option.isWarning ? 'text-rose-600 dark:text-rose-400' : 'text-[#1b75bc] dark:text-[#54b0e2]'}`} />
                   )}
                 </li>
               );

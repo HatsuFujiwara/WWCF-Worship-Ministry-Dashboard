@@ -1,18 +1,18 @@
-# WWCF Santa Cruz — Worship Ministry Dashboard
+# WWCF Worship Song Line-up Scheduler
 
-A dedicated, local-first worship ministry management dashboard built for **Word for the World Christian Fellowship (WWCF) Santa Cruz**.
+A dedicated, local-first worship song line-up scheduling and coordination workspace built for **Word for the World Christian Fellowship (WWCF) Santa Cruz**.
 
 ---
 
 ## 1. Product Overview
 
-The WWCF Worship Ministry Dashboard coordinates Sunday services and ministry gatherings. It provides church worship leaders, music directors, vocalists, and AV technicians with service-ready scheduling, cataloging, harmonic flow tracking, and rehearsal preparation.
+The **WWCF Worship Song Line-up Scheduler** coordinates Sunday services and ministry gatherings for WWCF Santa Cruz. It provides church worship leaders, music directors, vocalists, and AV technicians with service-ready scheduling, cataloging, harmonic flow tracking, and rehearsal preparation.
 
 ### Core Architecture
 - **Local-First Storage:** All ministry lineups, song catalogs, team rosters, and rehearsal notes are stored directly in local browser storage (LocalStorage as the sole local database) for zero-latency, reliable operation on stage and in rehearsal spaces.
 - **Google Drive Integration (Option A):** One shared, public Google OAuth 2.0 Web Client ID configured by the site owner enables automated or on-demand JSON backups directly to authorized Google Drive storage without requiring separate church accounts or server-side databases.
 - **Zero-Mock Policy:** All data displayed in the dashboard is authentic user ministry data. No synthetic mock schedules, fake members, or dummy statistics are injected.
-- **Service-Ready Visual Design:** High-contrast AMOLED pure black foundation (`#000000`) for stage visibility and dark tech booths, crisp light theme for daytime office planning, and WWCF brand blue (`#1b75bc`) accents. Designed without AI slop, radial washes, or illegible glass translucency.
+- **Service-Ready Visual Design:** Two core themes (**Light** and layered **Dark**) with a Dark-only **AMOLED** mode (true `#000000` OLED canvas preserving WWCF `#1b75bc` accents, status colors, and depth), an optional **Glass Mode** effect (default OFF; selective frosted blur across Light, Dark, and Dark + AMOLED), opaque-by-default cards/toolbars/modals, and an app-level **Performance Mode** that disables blur, translucency, ambient gradients, animations, transitions, shadows, and filters.
 
 ---
 
@@ -61,7 +61,7 @@ The WWCF Worship Ministry Dashboard coordinates Sunday services and ministry gat
 
 ## 4. Service Status, Planning & Live Lyrics Presentation (`NS-01`, `LY-01`, `L-01`–`L-09`)
 
-- **Explicit `No Service` Status (`NS-01`):** Dedicated `No Service` toggle with confirmation dialog and optional announcement reason (`<= 300` chars). Distinct from empty lineups and excluded from analytics, usage warnings, and rehearsal sheets.
+- **Explicit `No Service` Status (`NS-01`, `NS-02`):** Dedicated `No Service` toggle in the Scheduler and bulk `No Service` action in the Saved Schedules toolbar (`NS-02`), each with confirmation dialog, optional announcement reason (`<= 300` chars), and atomic single-step Undo/Redo. Distinct from empty lineups and excluded from analytics, usage warnings, and rehearsal sheets.
 - **Lyrics Studio & Slide Parser (`LY-01`):** Structured bracket-tag lyrics authoring (`[Verse]`, `[Chorus]`, `[Bridge]`, `[Instrumental]`, etc.) with `.txt` import (`<= 256 KB`), clipboard paste guard, LRC timestamp stripping, inline chord preservation, and configurable `2..6` lines-per-slide live preview.
 - **Dual-Window Lyrics Presenter & Audience Output (`LY-01`):** Operator presenter console (`Present Lyrics`) with live slide cues, next-slide preview, pre-cueing while blanked (`Blank Screen`), in-app Audience Mirror fallback, and an isolated `#000000` projection output window synchronized on the same device and browser profile via ephemeral `BroadcastChannel` sessions (`?lyrics-output=<sessionId>`).
 - **Ministry Planning Suite (`L-01`–`L-09`):** Reusable lineup templates, date- and service-type-scoped team availability matrix, 4-tier song familiarity & rotation heatmap, tempo dynamics curve, archive search, song variant comparison, print-ready A4 Rehearsal Sheet PDF, and full-screen Live Rehearsal Prompter.

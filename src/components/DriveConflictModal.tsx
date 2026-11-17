@@ -44,8 +44,8 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
     id: 'drive-conflict-modal',
     isOpen: Boolean(activeConflict),
     layer: OverlayLayer.CRITICAL_DIALOG,
-    onClose,
-    closeOnEscape: true
+    onClose: isResolving ? () => {} : onClose,
+    closeOnEscape: !isResolving
   });
 
   if (!activeConflict) return null;
@@ -55,6 +55,10 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
   const remoteSongCount = (remoteData.songs || []).length;
   const remoteScheduleCount = (remoteData.schedules || []).length;
   const remoteMemberCount = (remoteData.members || []).length;
+  const remoteFamilyCount = (remoteData.songFamilies || []).length;
+  const remoteTemplateCount = (remoteData.templates || []).length;
+  const remoteReadinessCount =
+    (remoteData.memberAvailability || []).length + (remoteData.songFamiliarity || []).length;
 
   const handleSelectCandidate = async (fileId: string) => {
     setSelectedFileId(fileId);
@@ -172,8 +176,10 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10"
+            disabled={isResolving}
+            className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 disabled:opacity-50"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -202,6 +208,7 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
                         type="radio"
                         name="candidateBackupFile"
                         checked={selectedFileId === cand.id}
+                        disabled={isResolving}
                         onChange={() => handleSelectCandidate(cand.id)}
                         className="text-blue-600 focus:ring-blue-500"
                       />
@@ -224,6 +231,9 @@ export const DriveConflictModal: React.FC<DriveConflictModalProps> = ({
               <div>Lineups: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteScheduleCount}</span></div>
               <div>Songs: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteSongCount}</span></div>
               <div>Members: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteMemberCount}</span></div>
+              <div>Families: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteFamilyCount}</span></div>
+              <div>Templates: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteTemplateCount}</span></div>
+              <div>Readiness: <span className="font-semibold text-slate-900 dark:text-slate-100">{remoteReadinessCount}</span></div>
             </div>
           </div>
 

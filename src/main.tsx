@@ -15,6 +15,7 @@ const MainWorkspace = lazy(async () => {
     import('./services/storage')
   ]);
   StorageService.applyAccessibilityToDOM(StorageService.getAccessibilitySettings());
+  StorageService.applyAppearanceToDOM();
   return {
     default: () => (
       <OverlayProvider>

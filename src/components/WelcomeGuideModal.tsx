@@ -85,7 +85,7 @@ export const WelcomeGuideModal: React.FC<WelcomeGuideModalProps> = ({
           </div>
 
           <h2 className="text-lg sm:text-xl font-bold tracking-tight">
-            Welcome to WWCF Santa Cruz Song Scheduler!
+            Welcome to WWCF Worship Song Line-up Scheduler!
           </h2>
           <p className="text-xs text-indigo-100 mt-1.5 leading-relaxed font-medium">
             Let us quickly show you how to create and manage a worship lineup.

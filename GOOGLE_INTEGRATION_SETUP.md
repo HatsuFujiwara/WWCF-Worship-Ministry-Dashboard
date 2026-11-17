@@ -1,4 +1,4 @@
-# WWCF Santa Cruz Worship Ministry Dashboard — Google Account & Cloud Integration Setup Guide
+# WWCF Worship Song Line-up Scheduler — Google Account & Cloud Integration Setup Guide
 
 This guide explains how to configure Google Identity Services (GIS) for optional Google Account sign-in, automated Google Drive cloud backup, and authorized YouTube / YouTube Music playlist importing.
 
@@ -6,7 +6,7 @@ This guide explains how to configure Google Identity Services (GIS) for optional
 
 ## 1. Overview & Architecture
 
-The WWCF Santa Cruz Worship Ministry Dashboard follows a **local-first, privacy-respecting architecture**:
+The **WWCF Worship Song Line-up Scheduler** follows a **local-first, privacy-respecting architecture**:
 
 1. **Local Working Copy is Authoritative:** LocalStorage remains the instant primary data store and offline fallback. The app functions completely without a Google account.
 2. **Opt-in Cloud Backup:** Connecting a Google account grants permission (`https://www.googleapis.com/auth/drive.file`) to read and write an application-specific file named `WWCF_Santa_Cruz_Worship_Ministry_Backup.json` in the user's personal Google Drive. The app cannot read or modify any other files in their Drive.
@@ -33,7 +33,7 @@ In your Google Cloud project, navigate to **APIs & Services > Library** and enab
 1. Navigate to **APIs & Services > OAuth consent screen**.
 2. Choose **External** user type (or **Internal** if using Google Workspace for your church domain) and click **Create**.
 3. Fill in the App Information:
-   - **App name:** `WWCF Santa Cruz Worship Ministry`
+   - **App name:** `WWCF Worship Song Line-up Scheduler`
    - **User support email:** Your ministry or admin email.
    - **Developer contact information:** Your admin email.
 4. On the **Scopes** step, click **Add or Remove Scopes** and select:
@@ -82,7 +82,7 @@ If testing in an environment where `.env` is not editable directly, you can also
    - No Google Drive API key is used or exposed (an API key cannot authorize personal user Drive storage).
 2. **Two Independent Actions in Settings:**
    - **Save to Drive:** Validates local data schema, confirms initial backup if no file exists in Drive, checks remote baseline to prevent accidental overwrites, and saves current data to Google Drive.
-   - **Load from Drive:** Inspects Drive backups, validates remote schema envelope, displays a preview comparison dialog showing collection counts (Songs, Schedules, Members, Families, Labels) against current device data, and offers three distinct actions:
+   - **Load from Drive:** Inspects Drive backups, validates remote schema envelope, displays a preview comparison dialog showing collection counts (Songs, Schedules, Members, Families, Labels, Templates, Availability, Familiarity) against current device data, and offers three distinct actions:
      - **Merge with this device**
      - **Replace this device's data**
      - **Cancel**

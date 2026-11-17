@@ -435,19 +435,36 @@ export const SongsView: React.FC<SongsViewProps> = ({
   const handleRequestDelete = (targets: Song[]) => {
     if (targets.length === 0) return;
 
+    const targetIds = new Set(targets.map((s) => s.id));
     const targetTitles = new Set(targets.map((s) => s.title.trim().toLowerCase()));
 
-    const affectedSchedules = schedules.filter((sch) => {
-      const schSongs = [...(sch.praiseSongs || []), ...(sch.worshipSongs || [])].map((s) => s.trim().toLowerCase());
-      return Array.from(targetTitles).some((t) => schSongs.includes(t));
-    });
+    const scheduleUsesTarget = (sch: Schedule, targetId?: string, targetTitleLower?: string) => {
+      const praiseIds = sch.praiseSongIds || [];
+      const worshipIds = sch.worshipSongIds || [];
+      const praiseTitles = sch.praiseSongs || [];
+      const worshipTitles = sch.worshipSongs || [];
 
+      const checkList = (titles: string[], ids: (string | undefined)[]) => {
+        const len = Math.max(titles.length, ids.length);
+        for (let i = 0; i < len; i++) {
+          const slotId = (ids[i] || '').trim();
+          const slotTitle = (titles[i] || '').trim().toLowerCase();
+          if (slotId) {
+            if (targetId ? slotId === targetId : targetIds.has(slotId)) return true;
+          } else if (slotTitle) {
+            if (targetTitleLower ? slotTitle === targetTitleLower : targetTitles.has(slotTitle)) return true;
+          }
+        }
+        return false;
+      };
+
+      return checkList(praiseTitles, praiseIds) || checkList(worshipTitles, worshipIds);
+    };
+
+    const affectedSchedules = schedules.filter((sch) => scheduleUsesTarget(sch));
     const songsInUse = targets.filter((s) => {
       const titleLower = s.title.trim().toLowerCase();
-      return schedules.some((sch) => {
-        const schSongs = [...(sch.praiseSongs || []), ...(sch.worshipSongs || [])].map((item) => item.trim().toLowerCase());
-        return schSongs.includes(titleLower);
-      });
+      return schedules.some((sch) => scheduleUsesTarget(sch, s.id, titleLower));
     });
 
     setBulkDeleteConfig({
@@ -646,11 +663,11 @@ export const SongsView: React.FC<SongsViewProps> = ({
     <div data-tour="songs-view" className="space-y-6">
       
       {/* View Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl wwcf-surface-hero border border-slate-200/80 dark:border-white/10 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-6 rounded-2xl wwcf-surface-hero shadow-xs">
         <div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
-            <Music className="w-6 h-6 text-[#1b75bc] dark:text-[#54b0e2]" />
-            <span>Song Database & Worship Library</span>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
+            <Music className="w-5 h-5 text-[#1b75bc] dark:text-[#54b0e2]" />
+            <span>Song Database &amp; Worship Library</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Manage church repertoire, keys, CCLI numbers, YouTube recordings, and historical set usage
@@ -665,7 +682,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
               setTargetExpandedFamilyId(null);
               setIsSongFamiliesModalOpen(true);
             }}
-            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white/85 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
             title="Manage multi-version song relationships & families"
           >
             <Layers className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
@@ -675,7 +692,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
           <button
             type="button"
             onClick={() => setIsFamiliarityModalOpen(true)}
-            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white/85 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
             title="Manage and inspect team song familiarity and mastery"
           >
             <HeartHandshake className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -687,7 +704,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
             data-tour="find-same-name-btn"
             data-tts-label="Find Same-Name Songs in database"
             onClick={handleOpenSameNameFinder}
-            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white/85 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer"
             title="Scan and review songs that share identical or normalized titles"
           >
             <GitCompare className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
@@ -701,7 +718,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
               setBulkMetadataInitialIds([]);
               setIsBulkMetadataModalOpen(true);
             }}
-            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white/80 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer shadow-xs"
+            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white/85 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 rounded-xl transition-all cursor-pointer shadow-xs"
             title="Scan and correct songs with missing artist, combined title/artist, or video clutter using MusicBrainz & Deezer"
           >
             <Sparkles className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
@@ -711,9 +728,9 @@ export const SongsView: React.FC<SongsViewProps> = ({
           <button
             onClick={() => setIsSmartImportOpen(true)}
             data-tour="import-playlist-btn"
-            className="btn-tactile inline-flex items-center gap-2 px-3.5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-red-600 to-[#1b75bc] hover:from-red-700 hover:to-[#165d97] rounded-xl transition-all shadow-xs cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 bg-white/90 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200/90 dark:border-white/15 rounded-xl transition-all shadow-xs cursor-pointer"
           >
-            <Youtube className="w-4 h-4 text-white" />
+            <Youtube className="w-4 h-4 text-rose-600 dark:text-rose-400" />
             <span>Import Song / Playlist</span>
           </button>
 
@@ -723,7 +740,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
               setIsModalOpen(true);
             }}
             data-tour="add-song-btn"
-            className="btn-tactile inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl shadow-xs transition-colors cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add New Song</span>
@@ -732,45 +749,45 @@ export const SongsView: React.FC<SongsViewProps> = ({
       </div>
       {/* Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs">
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Songs
           </p>
-          <p className="text-2xl font-black text-slate-900 dark:text-slate-100 tabular-nums mt-1">
+          <p className="text-2xl font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-1">
             {songs.length}
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs">
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Praise Songs
           </p>
-          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums mt-1">
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums mt-1">
             {praiseCount}
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs">
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Worship Songs
           </p>
-          <p className="text-2xl font-black text-[#1b75bc] dark:text-[#54b0e2] tabular-nums mt-1">
+          <p className="text-2xl font-bold text-[#1b75bc] dark:text-[#54b0e2] tabular-nums mt-1">
             {worshipCount}
           </p>
         </div>
 
-        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="p-4 rounded-xl wwcf-glass-card shadow-xs">
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Used This Month
           </p>
-          <p className="text-2xl font-black text-amber-600 dark:text-amber-400 tabular-nums mt-1">
+          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 tabular-nums mt-1">
             {songs.filter((s) => SongService.getMonthlyUsageCount(s.title, schedules, undefined, songs, undefined, s.id) > 0).length}
           </p>
         </div>
       </div>
 
       {/* Search & Filter Toolbar - Structured 2-Tier Layout */}
-      <div className="space-y-2.5 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 shadow-xs">
+      <div className="space-y-2.5 p-4 rounded-2xl wwcf-glass-card shadow-xs">
         {/* Tier 1: Search Bar & Match Count */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <div className="relative flex-1">
@@ -781,7 +798,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by song title, artist, key, CCLI, theme..."
-              className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-[#1b75bc]/20 focus:border-[#1b75bc] outline-none transition-all"
+              className="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none transition-all"
             />
             {searchQuery && (
               <button
@@ -850,7 +867,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
             value={languageFilter}
             onChange={(e) => setLanguageFilter(e.target.value)}
             aria-label="Filter songs by language"
-            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer"
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none min-h-[40px] cursor-pointer"
           >
             <option value="all">All Languages</option>
             <option value="English">English</option>
@@ -863,7 +880,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
             value={versionTypeFilter}
             onChange={(e) => setVersionTypeFilter(e.target.value as 'all' | 'original' | 'cover')}
             aria-label="Filter songs by version status"
-            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer"
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none min-h-[40px] cursor-pointer"
           >
             <option value="all">All Statuses</option>
             <option value="original">Originals Only</option>
@@ -876,7 +893,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SongSortOption)}
               aria-label="Sort songs"
-              className="pl-8 pr-8 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-200 outline-none min-h-[40px] cursor-pointer appearance-none hover:border-slate-300 dark:hover:border-white/20 transition-colors"
+              className="pl-8 pr-8 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none min-h-[40px] cursor-pointer appearance-none hover:border-slate-300 dark:hover:border-white/20 transition-colors"
             >
               <option value="name-asc">Name (A → Z)</option>
               <option value="name-desc">Name (Z → A)</option>
@@ -908,7 +925,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
       {/* Bulk Actions & Selection Bar */}
       <div
         data-tour="song-bulk-actions"
-        className="sticky top-[73px] sm:top-[77px] z-20 flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700 shadow-sm transition-all"
+        className="sticky top-[73px] sm:top-[77px] z-20 flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl wwcf-toolbar-sticky shadow-sm transition-all"
       >
         <div className="flex items-center gap-3">
           <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
@@ -919,13 +936,13 @@ export const SongsView: React.FC<SongsViewProps> = ({
                 if (el) el.indeterminate = isSomeSelected;
               }}
               onChange={() => toggleSelectAll(sortedSongs)}
-              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] cursor-pointer"
             />
             <span>Select All ({sortedSongs.length})</span>
           </label>
 
           {selectedCount > 0 && (
-            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/25">
               {selectedCount} selected
             </span>
           )}
@@ -944,7 +961,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                       setIsModalOpen(true);
                     }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 rounded-lg transition-colors cursor-pointer shadow-xs"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200 dark:border-white/15 rounded-lg transition-colors cursor-pointer shadow-xs"
                   title="Edit Song"
                 >
                   <Edit2 className="w-3.5 h-3.5" />
@@ -960,10 +977,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
                       setIsMetadataModalOpen(true);
                     }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] hover:bg-[#1b75bc]/15 border border-[#1b75bc]/25 rounded-lg transition-colors cursor-pointer shadow-xs"
                   title="Get Metadata from YouTube, Spotify, Apple Music, LRCLIB"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <Sparkles className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                   <span>Get Metadata</span>
                 </button>
               </>
@@ -992,9 +1009,9 @@ export const SongsView: React.FC<SongsViewProps> = ({
 
             <button
               onClick={() => handleRequestBulkCategoryChange('worship')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] hover:bg-[#1b75bc]/15 border border-[#1b75bc]/25 rounded-lg transition-colors cursor-pointer shadow-xs"
             >
-              <Tag className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <Tag className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
               <span>Set Selected to Worship</span>
             </button>
 
@@ -1049,10 +1066,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
                 setFamilyToEdit(null);
                 setIsFamilyModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] hover:bg-[#1b75bc]/15 border border-[#1b75bc]/25 rounded-lg transition-colors cursor-pointer shadow-xs"
               title="Create Song Family from selected songs"
             >
-              <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <Layers className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
               <span>Create Song Family</span>
             </button>
 
@@ -1073,13 +1090,13 @@ export const SongsView: React.FC<SongsViewProps> = ({
       {/* Song Cards List */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {songs.length === 0 ? (
-          <div className="col-span-full p-12 text-center bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-4">
-            <div className="w-12 h-12 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto text-2xl">
-              🎵
+          <div className="col-span-full p-12 text-center wwcf-glass-card rounded-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/20 flex items-center justify-center mx-auto">
+              <Music className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center justify-center gap-2">
-                <span>🎵</span> No songs found.
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                No songs found
               </h3>
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Your Song Database is currently empty.
@@ -1094,22 +1111,22 @@ export const SongsView: React.FC<SongsViewProps> = ({
                   setEditingSong(null);
                   setIsModalOpen(true);
                 }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-xs transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl cursor-pointer shadow-xs transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Song</span>
               </button>
               <button
                 onClick={() => setIsSmartImportOpen(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-700 hover:to-indigo-700 rounded-xl cursor-pointer shadow-xs transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 bg-white dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 border border-slate-200 dark:border-white/15 rounded-xl cursor-pointer shadow-xs transition-colors"
               >
-                <Youtube className="w-4 h-4 text-white" />
+                <Youtube className="w-4 h-4 text-rose-600 dark:text-rose-400" />
                 <span>Import Song / Playlist</span>
               </button>
             </div>
           </div>
         ) : sortedSongs.length === 0 ? (
-          <div className="col-span-full p-12 text-center bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+          <div className="col-span-full p-12 text-center wwcf-glass-card rounded-2xl space-y-3">
             <Music className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
             <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
               No songs found matching your search.
@@ -1125,10 +1142,10 @@ export const SongsView: React.FC<SongsViewProps> = ({
             return (
               <div
                 key={song.id}
-                className={`p-4 rounded-2xl bg-white dark:bg-slate-900 border transition-all flex flex-col justify-between space-y-3 card-hover-polish ${
+                className={`p-4 rounded-2xl wwcf-glass-card transition-all flex flex-col justify-between space-y-3 card-hover-polish ${
                   selected
-                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-[#1b75bc]/5 dark:bg-[#1b75bc]/10 shadow-xs'
-                    : 'border-slate-200/80 dark:border-white/10 shadow-xs hover:border-slate-300 dark:hover:border-white/20'
+                    ? 'border-[#1b75bc] dark:border-[#54b0e2] bg-[#f0f7fc]/70 dark:bg-[#0f2b44]/60 shadow-xs'
+                    : 'shadow-xs hover:border-slate-300 dark:hover:border-white/20'
                 }`}
               >
                 {/* Top Row: Checkbox + Thumbnail + Details */}
@@ -1138,7 +1155,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                     type="checkbox"
                     checked={selected}
                     onChange={(e) => toggleSelect(song.id, idx, e)}
-                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0 mt-1"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] cursor-pointer shrink-0 mt-1"
                   />
 
                   <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -1161,7 +1178,7 @@ export const SongsView: React.FC<SongsViewProps> = ({
                         )}
                       </div>
                     ) : (
-                      <div className="w-20 h-14 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center font-black text-xs shrink-0 border border-blue-100 dark:border-blue-900/60">
+                      <div className="w-20 h-14 rounded-xl bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center font-bold text-xs shrink-0 border border-[#1b75bc]/20">
                         {song.key || 'SONG'}
                       </div>
                     )}
@@ -1262,7 +1279,8 @@ export const SongsView: React.FC<SongsViewProps> = ({
                               key={themeTag}
                               className={getSongTagClass('theme')}
                             >
-                              🏷️ {themeTag}
+                              <Tag className="w-3 h-3 opacity-75 shrink-0" aria-hidden="true" />
+                              <span>{themeTag}</span>
                             </span>
                           ))}
                         </div>
@@ -1421,7 +1439,19 @@ export const SongsView: React.FC<SongsViewProps> = ({
             ? 'Delete this song from the Song Database?'
             : `Delete ${bulkDeleteConfig.targets.length} Selected Songs?`
         }
-        message="Historical saved line-ups using this song will remain unchanged."
+        message={
+          bulkDeleteConfig.affectedSchedulesCount > 0
+            ? `${
+                bulkDeleteConfig.targets.length === 1
+                  ? 'This song appears'
+                  : `${bulkDeleteConfig.songsInUseCount} of these songs appear`
+              } in ${bulkDeleteConfig.affectedSchedulesCount} saved line-up${
+                bulkDeleteConfig.affectedSchedulesCount > 1 ? 's' : ''
+              }. Historical saved line-ups using ${
+                bulkDeleteConfig.targets.length === 1 ? 'this song' : 'these songs'
+              } will remain unchanged.`
+            : 'Historical saved line-ups will remain unchanged.'
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         isDanger={true}

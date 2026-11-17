@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Member, MemberAvailability, AvailabilityStatus, ServiceType, normalizeServiceType } from '../types';
 import { AvailabilityService } from '../services/availabilityService';
 import { useOverlay, OverlayLayer } from '../hooks/useOverlay';
-import { formatDateDisplayManila } from '../utils/dateUtils';
+import { formatDateDisplayManila, getManilaTodayString } from '../utils/dateUtils';
 import {
   X,
   Calendar,
@@ -40,7 +40,7 @@ export const MemberAvailabilityModal: React.FC<MemberAvailabilityModalProps> = (
 }) => {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     if (initialDate && initialDate.trim()) return initialDate.trim();
-    return new Date().toISOString().slice(0, 10);
+    return getManilaTodayString();
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTag, setFilterTag] = useState<string>('all');
@@ -57,6 +57,8 @@ export const MemberAvailabilityModal: React.FC<MemberAvailabilityModalProps> = (
     if (isOpen) {
       if (initialDate && initialDate.trim()) {
         setSelectedDate(initialDate.trim());
+      } else {
+        setSelectedDate(getManilaTodayString());
       }
       setAvailabilityList(AvailabilityService.getAvailabilityListSync());
       setEditingNoteMemberId(null);

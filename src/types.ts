@@ -408,6 +408,22 @@ export interface AppLayoutPreferences {
   sidebarVisibility: SidebarVisibility;
 }
 
+export interface AppearancePreferences {
+  isDarkMode: boolean;
+  amoledEnabled: boolean;
+  glassModeEnabled: boolean;
+}
+
+export interface EffectiveAppearanceState {
+  isDarkMode: boolean;
+  amoledEnabled: boolean;
+  amoledEffective: boolean;
+  glassModePreference: boolean;
+  glassModeEffective: boolean;
+  glassBlockedByPerformance: boolean;
+  performanceMode: boolean;
+}
+
 export interface KeyboardShortcutDefinition {
   id: string;
   action: string;

@@ -1,5 +1,5 @@
 import { Song, Schedule, SongFamily } from '../types';
-import { formatDateDisplayManila, getManilaTodayString } from './dateUtils';
+import { formatDateDisplayManila, getDaysInMonth, getManilaDateParts, getManilaTodayString } from './dateUtils';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
 import { isNoServiceSchedule } from './scheduleUtils';
@@ -55,7 +55,7 @@ export function getLastWeekOfPreviousMonthRange(dateStr: string): { startDate: s
   } else {
     month -= 1;
   }
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const daysInPrevMonth = getDaysInMonth(year, month);
   const startDay = daysInPrevMonth - 6;
   const mPadded = String(month).padStart(2, '0');
   const startDayPadded = String(startDay).padStart(2, '0');
@@ -323,25 +323,17 @@ export function getSmartSongRecommendations(
   }
 ): RecommendedSong[] {
   let refDateStr = getManilaTodayString();
-  let refDate = new Date();
-
   if (options?.referenceDate) {
     if (typeof options.referenceDate === 'string') {
       refDateStr = options.referenceDate;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(refDateStr)) {
-        const [y, m, d] = refDateStr.split('-').map(Number);
-        refDate = new Date(y, m - 1, d);
-      }
     } else {
-      refDate = options.referenceDate;
-      const y = refDate.getFullYear();
-      const m = String(refDate.getMonth() + 1).padStart(2, '0');
-      const d = String(refDate.getDate()).padStart(2, '0');
-      refDateStr = `${y}-${m}-${d}`;
+      const parts = getManilaDateParts(options.referenceDate);
+      refDateStr = `${parts.yearMonth}-${String(parts.day).padStart(2, '0')}`;
     }
   }
 
-  const currentMonthIdx = refDate.getMonth(); // 0 - 11
+  const refParts = getManilaDateParts(refDateStr);
+  const currentMonthIdx = refParts.month - 1; // 0 - 11
   const seasonalConfig = MONTHLY_SEASONAL_THEMES[currentMonthIdx];
 
   // 1. Resolve Song Families
@@ -594,9 +586,9 @@ export function getSmartSongRecommendations(
     let monthsSinceLastPlayed = 999;
     let lastPlayedFormatted = '';
     if (lastUsedDate) {
-      const lastDate = new Date(lastUsedDate);
-      const yearDiff = refDate.getFullYear() - lastDate.getFullYear();
-      const monthDiff = refDate.getMonth() - lastDate.getMonth();
+      const lastParts = getManilaDateParts(lastUsedDate);
+      const yearDiff = refParts.year - lastParts.year;
+      const monthDiff = refParts.month - lastParts.month;
       monthsSinceLastPlayed = Math.max(0, yearDiff * 12 + monthDiff);
       lastPlayedFormatted = formatDateDisplayManila(lastUsedDate, { month: 'short', year: 'numeric' });
     }

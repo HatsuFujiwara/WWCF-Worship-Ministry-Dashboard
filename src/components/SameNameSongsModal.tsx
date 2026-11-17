@@ -434,7 +434,7 @@ export const SameNameSongsModal: React.FC<SameNameSongsModalProps> = ({
               onClick={() => setFilterTab('pending')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 filterTab === 'pending'
-                  ? 'bg-white dark:bg-slate-800 text-[#1b75bc] dark:text-[#54b0e2] shadow-2xs'
+                  ? 'bg-white dark:bg-[#1b75bc]/20 text-[#1b75bc] dark:text-[#54b0e2] border border-transparent dark:border-[#54b0e2]/40 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
@@ -453,7 +453,7 @@ export const SameNameSongsModal: React.FC<SameNameSongsModalProps> = ({
               onClick={() => setFilterTab('grouped')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 filterTab === 'grouped'
-                  ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-2xs'
+                  ? 'bg-white dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-transparent dark:border-emerald-500/35 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
@@ -468,7 +468,7 @@ export const SameNameSongsModal: React.FC<SameNameSongsModalProps> = ({
               onClick={() => setFilterTab('distinct')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 filterTab === 'distinct'
-                  ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                  ? 'bg-white dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-transparent dark:border-indigo-400/35 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
@@ -483,7 +483,7 @@ export const SameNameSongsModal: React.FC<SameNameSongsModalProps> = ({
               onClick={() => setFilterTab('all')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 filterTab === 'all'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-2xs'
+                  ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-slate-100 border border-transparent dark:border-white/20 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >

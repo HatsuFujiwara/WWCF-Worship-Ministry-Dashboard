@@ -1,8 +1,10 @@
-import { Schedule, ServiceType, Song, SongFamily } from '../types';
+import { Schedule, ServiceType, Song, SongFamily, RehearsalChecklist } from '../types';
 import { getManilaTodayString, getManilaDateParts, addDaysToDateString, getManilaNowISO } from './dateUtils';
 import { isSpecialEvent, isFirstWeekOfMonth, getLastWeekOfPreviousMonthRange } from './recommendationUtils';
 import { SongService } from '../services/songService';
 import { resolveSlotSong } from './songResolveUtils';
+
+export const NO_SERVICE_REASON_MAX_LENGTH = 300;
 
 export interface RepeatedOccurrence {
   scheduleId: string;
@@ -17,6 +19,38 @@ export interface RepeatedSongDetail {
 }
 
 export type ScheduleStatus = 'no_service' | 'empty' | 'populated';
+
+/**
+ * Returns the canonical default Rehearsal Readiness Checklist with strict false values.
+ */
+export function createDefaultRehearsalChecklist(): RehearsalChecklist {
+  return {
+    songSelectionFinalized: false,
+    performedKeysChecked: false,
+    lyricsReviewed: false,
+    referencesChecked: false,
+    teamAssignmentsFinalized: false,
+    transitionsPrepared: false
+  };
+}
+
+/**
+ * Normalizes an optional No Service reason to trimmed text bounded to 300 characters,
+ * returning undefined when blank.
+ */
+export function normalizeNoServiceReason(reason?: string | null): string | undefined {
+  if (typeof reason !== 'string') return undefined;
+  const trimmed = reason.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, NO_SERVICE_REASON_MAX_LENGTH);
+}
+
+/**
+ * Identifies automatically generated monthly placeholder schedule rows (`placeholder_...`).
+ */
+export function isGeneratedPlaceholderSchedule(schedule?: Partial<Schedule> | null): boolean {
+  return Boolean(typeof schedule?.id === 'string' && schedule.id.startsWith('placeholder_'));
+}
 
 /**
  * Explicit check for No Service records. Never infers No Service from an empty schedule.
@@ -50,6 +84,135 @@ export function getScheduleStatus(schedule?: Partial<Schedule> | null): Schedule
   if (isNoServiceSchedule(schedule)) return 'no_service';
   if (isScheduleEmpty(schedule)) return 'empty';
   return 'populated';
+}
+
+export interface NoServiceSelectionPartition {
+  eligible: Schedule[];
+  alreadyNoService: Schedule[];
+  placeholders: Schedule[];
+  missingCount: number;
+}
+
+/**
+ * Partitions selected schedule IDs against the authoritative schedule list so only
+ * eligible saved (non-placeholder, non-No-Service) records are converted.
+ */
+export function partitionNoServiceConversionSelection(
+  selectedIds: Iterable<string>,
+  schedules: Schedule[]
+): NoServiceSelectionPartition {
+  const byId = new Map<string, Schedule>();
+  for (const sch of schedules) {
+    byId.set(sch.id, sch);
+  }
+
+  const seenIds = new Set<string>();
+  const eligible: Schedule[] = [];
+  const alreadyNoService: Schedule[] = [];
+  const placeholders: Schedule[] = [];
+  let missingCount = 0;
+
+  for (const rawId of selectedIds) {
+    if (typeof rawId !== 'string' || !rawId || seenIds.has(rawId)) continue;
+    seenIds.add(rawId);
+
+    const sch = byId.get(rawId);
+    if (!sch) {
+      missingCount += 1;
+      continue;
+    }
+    if (isGeneratedPlaceholderSchedule(sch)) {
+      placeholders.push(sch);
+      continue;
+    }
+    if (isNoServiceSchedule(sch)) {
+      alreadyNoService.push(sch);
+      continue;
+    }
+    eligible.push(sch);
+  }
+
+  return { eligible, alreadyNoService, placeholders, missingCount };
+}
+
+/**
+ * Converts a single saved schedule into a canonical No Service record while preserving
+ * id, serviceType, serviceDate, and notes, and clearing songs, keys, assignments, transitions, and checklist.
+ */
+export function convertScheduleToNoService(
+  schedule: Schedule,
+  reason?: string,
+  updatedAt: string = getManilaNowISO()
+): Schedule {
+  const normalizedReason = normalizeNoServiceReason(reason);
+  return {
+    id: schedule.id,
+    serviceType: schedule.serviceType,
+    serviceDate: schedule.serviceDate,
+    praiseSongs: [],
+    worshipSongs: [],
+    praiseSongKeys: [],
+    worshipSongKeys: [],
+    praiseSongIds: [],
+    worshipSongIds: [],
+    ministryAssignments: [],
+    notes: typeof schedule.notes === 'string' ? schedule.notes.trim() : '',
+    transitionNotes: {},
+    rehearsalChecklist: createDefaultRehearsalChecklist(),
+    noService: true,
+    ...(normalizedReason ? { noServiceReason: normalizedReason } : {}),
+    updatedAt
+  };
+}
+
+export interface BulkNoServiceConversionResult {
+  nextSchedules: Schedule[];
+  convertedSchedules: Schedule[];
+  convertedCount: number;
+  skippedNoServiceCount: number;
+  skippedPlaceholderCount: number;
+  missingCount: number;
+}
+
+/**
+ * Applies canonical No Service conversion to eligible selected saved schedules without
+ * mutating the input array or converting already-No-Service or placeholder records.
+ */
+export function applyBulkNoServiceConversion(
+  selectedIds: Iterable<string>,
+  schedules: Schedule[],
+  reason?: string,
+  updatedAt: string = getManilaNowISO()
+): BulkNoServiceConversionResult {
+  const partition = partitionNoServiceConversionSelection(selectedIds, schedules);
+  if (partition.eligible.length === 0) {
+    return {
+      nextSchedules: schedules,
+      convertedSchedules: [],
+      convertedCount: 0,
+      skippedNoServiceCount: partition.alreadyNoService.length,
+      skippedPlaceholderCount: partition.placeholders.length,
+      missingCount: partition.missingCount
+    };
+  }
+
+  const eligibleIdSet = new Set(partition.eligible.map((s) => s.id));
+  const convertedSchedules: Schedule[] = [];
+  const nextSchedules = schedules.map((sch) => {
+    if (!eligibleIdSet.has(sch.id)) return sch;
+    const converted = convertScheduleToNoService(sch, reason, updatedAt);
+    convertedSchedules.push(converted);
+    return converted;
+  });
+
+  return {
+    nextSchedules,
+    convertedSchedules,
+    convertedCount: convertedSchedules.length,
+    skippedNoServiceCount: partition.alreadyNoService.length,
+    skippedPlaceholderCount: partition.placeholders.length,
+    missingCount: partition.missingCount
+  };
 }
 
 export function getPreviousMonthString(ym: string): string {

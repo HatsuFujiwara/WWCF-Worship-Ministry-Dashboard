@@ -73,7 +73,7 @@ export const HelpMenuModal: React.FC<HelpMenuModalProps> = ({
     { title: 'Song Repetition Guard & Variety', stepId: 360, icon: Shield, badge: 'Guide', desc: 'First-come, first-serve monthly song repetition warnings across schedules' },
     { title: 'Saved Line-ups Archive & History', stepId: 370, icon: Calendar, badge: 'Guide', desc: 'Historical archive, multi-field search, month filters & batch operations' },
     { title: 'Backup & Restore Data', stepId: 380, icon: Database, badge: 'Guide', desc: 'Export or restore complete JSON database backups securely' },
-    { title: 'Application Settings & Themes', stepId: 390, icon: Settings, badge: 'Guide', desc: 'Theme options (Light, AMOLED Dark) & Interactive Guide auto-show preferences' }
+    { title: 'Application Settings & Themes', stepId: 390, icon: Settings, badge: 'Guide', desc: 'Theme options (Light, Dark, true-black AMOLED, Glass Mode) & Performance Mode preferences' }
   ];
 
   if (!isOpen) return null;
@@ -90,7 +90,7 @@ export const HelpMenuModal: React.FC<HelpMenuModalProps> = ({
       inert={isBlocked ? true : undefined}
     >
       <div
-        className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh] my-auto transform animate-in zoom-in-95 duration-200"
+        className="w-full max-w-xl wwcf-glass-modal bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh] my-auto transform animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -104,7 +104,7 @@ export const HelpMenuModal: React.FC<HelpMenuModalProps> = ({
                 Interactive Help & Guides
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Word for the World - Santa Cruz Worship Ministry
+                WWCF Worship Song Line-up Scheduler • WWCF Santa Cruz
               </p>
             </div>
           </div>

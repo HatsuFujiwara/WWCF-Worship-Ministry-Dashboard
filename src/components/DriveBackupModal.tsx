@@ -39,6 +39,9 @@ export interface DriveBackupModalProps {
     members: number;
     families: number;
     labels: number;
+    templates?: number;
+    availability?: number;
+    familiarity?: number;
   };
   candidates?: DriveFileInfo[];
   candidateAction?: 'save' | 'load';
@@ -51,6 +54,9 @@ export interface DriveBackupModalProps {
       members: number;
       families: number;
       labels: number;
+      templates?: number;
+      availability?: number;
+      familiarity?: number;
       hasDraft: boolean;
     };
   } | null;
@@ -82,9 +88,13 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
     candidates[0]?.id || ''
   );
 
-  // Update selected candidate ID when candidates change
+  // Update selected candidate ID whenever candidates change or current selection is stale
   React.useEffect(() => {
-    if (candidates && candidates.length > 0 && !selectedCandidateId) {
+    if (!candidates || candidates.length === 0) {
+      if (selectedCandidateId) setSelectedCandidateId('');
+      return;
+    }
+    if (!selectedCandidateId || !candidates.some((c) => c.id === selectedCandidateId)) {
       setSelectedCandidateId(candidates[0].id);
     }
   }, [candidates, selectedCandidateId]);
@@ -186,7 +196,7 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
                 {view === 'no_backups' && 'No Cloud Backups Found'}
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                WWCF Santa Cruz Worship Ministry • Google Drive
+                WWCF Worship Song Line-up Scheduler • Google Drive
               </p>
             </div>
           </div>
@@ -250,6 +260,22 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
                   </div>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     Labels
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-2xs">
+                  <div className="text-base font-black text-cyan-600 dark:text-cyan-400">
+                    {localCounts?.templates ?? 0}
+                  </div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Templates
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-2xs">
+                  <div className="text-base font-black text-teal-600 dark:text-teal-400">
+                    {(localCounts?.availability ?? 0) + (localCounts?.familiarity ?? 0)}
+                  </div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Readiness Logs
                   </div>
                 </div>
               </div>
@@ -451,6 +477,33 @@ export const DriveBackupModal: React.FC<DriveBackupModalProps> = ({
                     </span>
                     <span className="text-right text-slate-500">
                       {localCounts?.labels ?? 0}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 p-2 bg-white dark:bg-slate-900">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">Lineup Templates</span>
+                    <span className="text-center font-bold text-cyan-600 dark:text-cyan-400">
+                      {previewData.counts.templates ?? 0}
+                    </span>
+                    <span className="text-right text-slate-500">
+                      {localCounts?.templates ?? 0}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 p-2 bg-white dark:bg-slate-900">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">Availability Records</span>
+                    <span className="text-center font-bold text-teal-600 dark:text-teal-400">
+                      {previewData.counts.availability ?? 0}
+                    </span>
+                    <span className="text-right text-slate-500">
+                      {localCounts?.availability ?? 0}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 p-2 bg-white dark:bg-slate-900">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">Song Familiarity</span>
+                    <span className="text-center font-bold text-sky-600 dark:text-sky-400">
+                      {previewData.counts.familiarity ?? 0}
+                    </span>
+                    <span className="text-right text-slate-500">
+                      {localCounts?.familiarity ?? 0}
                     </span>
                   </div>
                   {previewData.counts.hasDraft && (

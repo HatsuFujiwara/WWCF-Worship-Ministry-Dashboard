@@ -225,16 +225,22 @@ export const BulkMetadataReviewModal: React.FC<BulkMetadataReviewModalProps> = (
       });
 
       try {
-        // Query multi-source metadata (MusicBrainz as Primary, Deezer as Secondary Fallback)
+        // Query multi-source metadata across Spotify, YouTube, Apple Music, MusicBrainz (Fallback), and Deezer (Fallback)
         const meta = await fetchMultiSourceMetadata(currentSong.youtubeUrl || currentSong.title, currentSong);
 
         let verificationSource = 'Multi-Source';
-        if (meta.sourcesSucceeded.includes('MusicBrainz (Primary)')) {
-          verificationSource = 'MusicBrainz (Primary)';
-        } else if (meta.sourcesSucceeded.includes('Deezer (Secondary Fallback)')) {
-          verificationSource = 'Deezer (Secondary Fallback)';
+        if (meta.sourcesSucceeded.includes('MusicBrainz (Fallback)')) {
+          verificationSource = 'MusicBrainz (Fallback)';
         } else if (meta.sourcesSucceeded.includes('Apple Music')) {
           verificationSource = 'Apple Music';
+        } else if (meta.sourcesSucceeded.includes('Deezer (Fallback)')) {
+          verificationSource = 'Deezer (Fallback)';
+        } else if (meta.sourcesSucceeded.includes('Spotify')) {
+          verificationSource = 'Spotify';
+        } else if (meta.sourcesSucceeded.includes('YouTube Music')) {
+          verificationSource = 'YouTube Music';
+        } else if (meta.sourcesSucceeded.includes('YouTube')) {
+          verificationSource = 'YouTube';
         }
 
         const candidate = parseCandidateTitleAndArtist(currentSong.title, currentSong.artist);
@@ -265,11 +271,16 @@ export const BulkMetadataReviewModal: React.FC<BulkMetadataReviewModalProps> = (
           proposedIsrc: meta.isrc || currentSong.isrc,
           verificationSource,
           hasMatch: isMeaningfulUpdate,
-          confidence: meta.sourcesSucceeded.includes('MusicBrainz (Primary)')
-            ? 'high'
-            : meta.sourcesSucceeded.includes('Deezer (Secondary Fallback)')
-            ? 'medium'
-            : 'low'
+          confidence:
+            meta.sourcesSucceeded.includes('MusicBrainz (Fallback)') ||
+            meta.sourcesSucceeded.includes('Apple Music') ||
+            meta.sourcesSucceeded.includes('Spotify')
+              ? 'high'
+              : meta.sourcesSucceeded.includes('Deezer (Fallback)') ||
+                meta.sourcesSucceeded.includes('YouTube Music') ||
+                meta.sourcesSucceeded.includes('YouTube')
+              ? 'medium'
+              : 'low'
         });
       } catch (err) {
         console.warn(`Metadata lookup error for ${currentSong.title}:`, err);
@@ -641,7 +652,7 @@ export const BulkMetadataReviewModal: React.FC<BulkMetadataReviewModalProps> = (
                   {Math.round((fetchProgress.current / (fetchProgress.total || 1)) * 100)}%
                 </span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 border border-slate-300/60 dark:border-white/15 overflow-hidden">
                 <div
                   className="h-full bg-[#1b75bc] transition-all duration-300 rounded-full"
                   style={{

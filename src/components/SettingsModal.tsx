@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { StorageService, GuideAutoShowMode } from '../services/storage';
+import { StorageService, GuideAutoShowMode, computeEffectiveAppearance } from '../services/storage';
 import {
   AccessibilitySettings,
   TextSizeOption,
@@ -63,7 +63,8 @@ import {
   Key,
   UploadCloud,
   DownloadCloud,
-  Copy
+  Copy,
+  Layers
 } from 'lucide-react';
 import { speechAssistant } from '../utils/speechAssistant';
 import { cancelHaptic } from '../utils/haptics';
@@ -77,6 +78,9 @@ import {
 import { YouTubePlaylistService } from '../services/youtubePlaylistService';
 import { SongService } from '../services/songService';
 import { SongFamilyService } from '../services/songFamilyService';
+import { TemplateService } from '../services/templateService';
+import { AvailabilityService } from '../services/availabilityService';
+import { FamiliarityService } from '../services/familiarityService';
 import { DriveBackupModal, DriveModalView } from './DriveBackupModal';
 
 
@@ -85,6 +89,10 @@ interface SettingsModalProps {
   onClose: () => void;
   isDarkMode: boolean;
   setIsDarkMode: (dark: boolean) => void;
+  isAmoledEnabled?: boolean;
+  setIsAmoledEnabled?: (enabled: boolean) => void;
+  isGlassModeEnabled?: boolean;
+  setIsGlassModeEnabled?: (enabled: boolean) => void;
   accessibilitySettings?: AccessibilitySettings;
   onUpdateAccessibility?: (settings: AccessibilitySettings) => void;
   onOpenOnboarding: () => void;
@@ -99,6 +107,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   isDarkMode,
   setIsDarkMode,
+  isAmoledEnabled = false,
+  setIsAmoledEnabled,
+  isGlassModeEnabled = false,
+  setIsGlassModeEnabled,
   accessibilitySettings: externalAccessibility,
   onUpdateAccessibility,
   onOpenOnboarding,
@@ -150,6 +162,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     members: number;
     families: number;
     labels: number;
+    templates?: number;
+    availability?: number;
+    familiarity?: number;
   }>();
   const [driveCandidates, setDriveCandidates] = useState<DriveFileInfo[]>([]);
   const [driveCandidateAction, setDriveCandidateAction] = useState<'save' | 'load'>('save');
@@ -162,6 +177,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       members: number;
       families: number;
       labels: number;
+      templates?: number;
+      availability?: number;
+      familiarity?: number;
       hasDraft: boolean;
     };
   } | null>(null);
@@ -267,12 +285,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const schedules = StorageService.getSchedules();
       const songFamilies = await SongFamilyService.getSongFamilies();
       const labels = StorageService.getLabels();
+      const templates = TemplateService.getTemplatesSync();
+      const availability = AvailabilityService.getAvailabilityListSync();
+      const familiarity = FamiliarityService.getFamiliarityListSync();
       setDriveLocalCounts({
         songs: songs.length,
         schedules: schedules.length,
         members: members.length,
         families: songFamilies.length,
-        labels: labels.length
+        labels: labels.length,
+        templates: templates.length,
+        availability: availability.length,
+        familiarity: familiarity.length
       });
 
       const res = await GoogleAuthService.loadBackupPreview();
@@ -714,7 +738,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           showTtsPanel: 'Floating Speech Bar',
           hapticFeedback: 'Haptic Vibration Feedback',
           simplifiedInterface: 'Simplified Interface',
-          performanceMode: 'Low-End Hardware Mode',
+          performanceMode: 'Performance Mode',
           audioFeedback: 'Audio Feedback Cues',
           visualToastAlerts: 'Visual Toast Alerts'
         };
@@ -810,25 +834,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  // Compact Switch Component
+  // Accessible Switch Component
   const Switch: React.FC<{
     checked: boolean;
     onChange: () => void;
     label: string;
-  }> = ({ checked, onChange, label }) => (
+    disabled?: boolean;
+    describedBy?: string;
+  }> = ({ checked, onChange, label, disabled = false, describedBy }) => (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
-      onClick={onChange}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 ${
-        checked ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
+      aria-describedby={describedBy}
+      disabled={disabled}
+      onClick={() => {
+        if (disabled) return;
+        onChange();
+      }}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus-visible:ring-2 focus-visible:ring-[#1b75bc] focus-visible:ring-offset-1 ${
+        disabled
+          ? 'cursor-not-allowed opacity-60 bg-slate-200 dark:bg-slate-800'
+          : checked
+          ? 'cursor-pointer bg-[#1b75bc]'
+          : 'cursor-pointer bg-slate-300 dark:bg-slate-700'
       }`}
     >
       <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${
-          checked ? 'translate-x-4' : 'translate-x-0'
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${
+          checked ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
     </button>
@@ -875,6 +910,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const showShortcuts = settingsCategory === 'all' || settingsCategory === 'shortcuts';
   const showData = settingsCategory === 'all' || settingsCategory === 'data';
 
+  const effectiveAppearance = computeEffectiveAppearance({
+    isDarkMode,
+    amoledEnabled: Boolean(isAmoledEnabled),
+    glassModeEnabled: Boolean(isGlassModeEnabled),
+    performanceMode: Boolean(accessibility.performanceMode)
+  });
+  const isGlassRestricted = effectiveAppearance.glassBlockedByPerformance;
+
+  const glassStatusDescription = effectiveAppearance.glassBlockedByPerformance
+    ? effectiveAppearance.glassModePreference
+      ? 'Suspended by Performance Mode. Saved preference (ON) will resume when Performance Mode is turned off.'
+      : 'Suspended by Performance Mode. Turn off Performance Mode to enable translucent glass surfaces.'
+    : 'Applies frosted translucency and backdrop blur to navigation, modals, toolbars, and featured cards in Light, Dark, and AMOLED.';
+
+  const appearanceSummaryLabel = !isDarkMode
+    ? effectiveAppearance.glassModeEffective
+      ? 'Light • Glass'
+      : 'Light'
+    : effectiveAppearance.amoledEffective && effectiveAppearance.glassModeEffective
+    ? 'Dark • AMOLED • Glass'
+    : effectiveAppearance.amoledEffective
+    ? 'Dark • AMOLED'
+    : effectiveAppearance.glassModeEffective
+    ? 'Dark • Glass'
+    : 'Dark';
+
   if (!isOpen) return null;
 
   const modalContent = (
@@ -895,7 +956,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
-        className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh] my-auto transform modal-enter-animation"
+        className="w-full max-w-2xl wwcf-glass-modal bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh] my-auto transform modal-enter-animation"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -953,41 +1014,185 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Section: Appearance & Navigation */}
           {showGeneral && (
             <>
-              <div data-tour="theme-toggle" className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                {isDarkMode ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
-                Appearance
+              <div data-tour="theme-toggle" className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-3.5">
+            {/* Appearance Header */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 text-[#1b75bc] dark:text-[#54b0e2]">
+                  {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4 text-amber-500" />}
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Appearance
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Theme mode, true-black AMOLED canvas, and frosted surface effects
+                  </p>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shrink-0">
+                {appearanceSummaryLabel}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setIsDarkMode(false)}
-                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                  !isDarkMode
-                    ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
-                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                }`}
-              >
-                <Sun className="w-3.5 h-3.5 text-amber-500" />
-                <span>Light Theme</span>
-                {!isDarkMode && <Check className="w-3 h-3 text-indigo-600 ml-auto" />}
-              </button>
 
-              <button
-                type="button"
-                onClick={() => setIsDarkMode(true)}
-                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                  isDarkMode
-                    ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
-                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                }`}
+            {/* Group 1: Theme Mode (Strictly Light or Dark) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Theme Mode
+                </span>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label="Theme Mode"
+                className="grid grid-cols-1 sm:grid-cols-2 gap-2"
               >
-                <Moon className="w-3.5 h-3.5 text-indigo-400" />
-                <span>AMOLED Dark</span>
-                {isDarkMode && <Check className="w-3 h-3 text-indigo-400 ml-auto" />}
-              </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!isDarkMode}
+                  onClick={() => setIsDarkMode(false)}
+                  className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
+                    !isDarkMode
+                      ? 'bg-[#f0f7fc] border-[#1b75bc] text-[#165d97] dark:bg-[#1b75bc]/20 dark:border-[#54b0e2] dark:text-[#8ccbed] ring-1 ring-[#1b75bc]/25'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
+                  <Sun className="w-4 h-4 text-amber-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold leading-tight">Light</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      Daylight workspace
+                    </div>
+                  </div>
+                  {!isDarkMode && <Check className="w-4 h-4 text-[#1b75bc] shrink-0" />}
+                </button>
+
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={isDarkMode}
+                  onClick={() => setIsDarkMode(true)}
+                  className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
+                    isDarkMode
+                      ? 'bg-[#f0f7fc] border-[#1b75bc] text-[#165d97] dark:bg-[#1b75bc]/20 dark:border-[#54b0e2] dark:text-[#8ccbed] ring-1 ring-[#1b75bc]/25'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
+                  <Moon className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold leading-tight">Dark</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      Low-light dark theme
+                    </div>
+                  </div>
+                  {isDarkMode && <Check className="w-4 h-4 text-[#54b0e2] shrink-0" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Group 2: Dark Mode Modifier (Visible ONLY when Dark Mode is selected) */}
+            {isDarkMode && (
+              <div className="space-y-1.5 pt-1">
+                <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Dark Surface Mode
+                </span>
+                <div className="flex items-center justify-between gap-3 px-3.5 py-3 min-h-[44px] bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-center shrink-0 mt-0.5">
+                      <Contrast className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                          AMOLED
+                        </span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          {isAmoledEnabled ? 'True Black' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                        Use a true-black app canvas while retaining WWCF accent colors, status colors, and visual detail.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center">
+                    <Switch
+                      checked={Boolean(isAmoledEnabled)}
+                      onChange={() => setIsAmoledEnabled?.(!isAmoledEnabled)}
+                      label="AMOLED"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Group 3: Surface Effects (Glass Mode) */}
+            <div className="space-y-1.5 pt-1">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Surface Effects
+              </span>
+              <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex items-center justify-between gap-3 min-h-[44px]">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-[#1b75bc] dark:text-[#54b0e2] flex items-center justify-center shrink-0 mt-0.5">
+                      <Layers className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                          Glass Mode
+                        </span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          {effectiveAppearance.glassModeEffective
+                            ? 'ON'
+                            : isGlassRestricted && effectiveAppearance.glassModePreference
+                            ? 'Suspended • Saved ON'
+                            : isGlassRestricted
+                            ? 'Unavailable'
+                            : 'OFF'}
+                        </span>
+                      </div>
+                      <p
+                        id="settings-glass-mode-desc"
+                        className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug"
+                      >
+                        {glassStatusDescription}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center">
+                    <Switch
+                      checked={effectiveAppearance.glassModeEffective}
+                      disabled={isGlassRestricted}
+                      describedBy="settings-glass-mode-desc"
+                      onChange={() => {
+                        if (isGlassRestricted) return;
+                        setIsGlassModeEnabled?.(!isGlassModeEnabled);
+                      }}
+                      label="Glass Mode"
+                    />
+                  </div>
+                </div>
+
+                {effectiveAppearance.glassBlockedByPerformance && (
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                    <span className="text-amber-700 dark:text-amber-300 font-medium">
+                      Glass Mode is suspended while Performance Mode is active.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSettingsCategory('accessibility');
+                        setOpenSection('performance');
+                      }}
+                      className="text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] hover:underline shrink-0 cursor-pointer"
+                    >
+                      Performance settings
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1379,7 +1584,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 {openSection === 'vision' && (
                   <div className="p-2.5 pt-0 space-y-1.5 border-t border-slate-100 dark:border-slate-750 bg-slate-50/50 dark:bg-slate-850/40">
-                    <SettingRow icon={<Contrast className="w-3 h-3 text-emerald-600" />} label="High Contrast" tooltip="Increases border definition and text contrast while preserving AMOLED black">
+                    <SettingRow icon={<Contrast className="w-3 h-3 text-emerald-600" />} label="High Contrast" tooltip="Increases border definition and text contrast across light and dark modes">
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-slate-400">{accessibility.highContrast ? 'ON' : 'OFF'}</span>
                         <Switch checked={accessibility.highContrast} onChange={() => handleToggleAccessibility('highContrast')} label="High Contrast" />
@@ -1395,7 +1600,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onClick={() => handleTextSizeChange(sz)}
                             className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
                               accessibility.textSize === sz
-                                ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
+                                ? 'bg-white dark:bg-[#1b75bc]/20 text-indigo-600 dark:text-[#54b0e2] border border-transparent dark:border-[#54b0e2]/40 font-bold shadow-2xs'
                                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
                             }`}
                           >
@@ -1435,7 +1640,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onClick={() => handleDisplayDensityChange(d)}
                             className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
                               (accessibility.displayDensity || 'comfortable') === d
-                                ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold shadow-2xs'
+                                ? 'bg-white dark:bg-[#1b75bc]/20 text-indigo-600 dark:text-[#54b0e2] border border-transparent dark:border-[#54b0e2]/40 font-bold shadow-2xs'
                                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
                             }`}
                           >
@@ -1638,7 +1843,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onClick={() => handleTtsRateChange(rate)}
                             className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
                               Math.abs((accessibility.ttsSpeechRate || 0.85) - rate) < 0.04
-                                ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 font-bold shadow-2xs'
+                                ? 'bg-white dark:bg-[#1b75bc]/20 text-teal-600 dark:text-teal-300 border border-transparent dark:border-teal-400/40 font-bold shadow-2xs'
                                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
                             }`}
                           >
@@ -1702,13 +1907,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
 
                 {openSection === 'performance' && (
-                  <div className="p-2.5 pt-0 space-y-1.5 border-t border-slate-100 dark:border-slate-750 bg-slate-50/50 dark:bg-slate-850/40">
-                    <SettingRow icon={<Gauge className="w-3 h-3 text-indigo-500" />} label="Low-End Hardware Mode" tooltip="Disables blur backdrops and heavy filters for older mobile phones and tablets">
+                  <div className="p-2.5 pt-0 space-y-2 border-t border-slate-100 dark:border-slate-750 bg-slate-50/50 dark:bg-slate-850/40">
+                    <SettingRow icon={<Gauge className="w-3 h-3 text-indigo-500" />} label="Performance Mode" tooltip="Disables Glass Mode, backdrop blur, shadows, filters, and non-essential animations for smooth responsiveness on any device">
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-slate-400">{accessibility.performanceMode ? 'ON' : 'OFF'}</span>
-                        <Switch checked={Boolean(accessibility.performanceMode)} onChange={() => handleToggleAccessibility('performanceMode')} label="Low-End Hardware Mode" />
+                        <Switch checked={Boolean(accessibility.performanceMode)} onChange={() => handleToggleAccessibility('performanceMode')} label="Performance Mode" />
                       </div>
                     </SettingRow>
+                    <p className="px-1 text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                      {accessibility.performanceMode
+                        ? 'Active: Glass Mode, backdrop blur, box shadows, and non-essential UI animations are disabled. Your saved Glass Mode preference is preserved.'
+                        : 'Reduces GPU and visual overhead by disabling Glass Mode translucency, backdrop blur, shadows, and non-essential animations.'}
+                    </p>
                   </div>
                 )}
               </div>

@@ -17,7 +17,7 @@ import { calculateSongAnalytics, getScheduleSongLeaders } from '../utils/songAna
 import { isPopulatedSchedule } from '../utils/scheduleUtils';
 import { getManilaTodayString, formatDateDisplayManila } from '../utils/dateUtils';
 import { getTagColorStyle } from '../utils/tagUtils';
-import { resolveSlotSong } from '../utils/songResolveUtils';
+import { resolveSlotSong, resolveScheduleSongTitles } from '../utils/songResolveUtils';
 import {
   BarChart3,
   Calendar,
@@ -82,7 +82,7 @@ const TriStateCheckbox: React.FC<{
       aria-checked={indeterminate ? 'mixed' : checked}
       onChange={onChange}
       aria-label={ariaLabel}
-      className={`rounded text-blue-600 focus:ring-blue-500 cursor-pointer ${className}`}
+      className={`rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer ${className}`}
     />
   );
 };
@@ -289,7 +289,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
         entry.totalPlays += 1;
         entry.dates.add(s.serviceDate);
-        entry.dateDetails.set(s.serviceDate, {
+        entry.dateDetails.set(s.id, {
           key: keyUsed || realSong?.key,
           isPraise,
           leaderName: leaderNames,
@@ -724,13 +724,13 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
       {/* ─────────────────────────────────────────────────────────────
           COMPACT TOP BAR: Live Status & Jump Action
       ───────────────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="wwcf-glass-card rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#1b75bc] dark:text-[#54b0e2]">
               Report Builder
             </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tabular-nums bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/25 dark:border-[#54b0e2]/25">
               <span className="w-1.5 h-1.5 rounded-full bg-[#1b75bc]" />
               {isDateRangeInvalid
                 ? 'Invalid date range'
@@ -750,7 +750,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             onClick={() => jumpTo(previewRef)}
             className="py-2 px-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
-            <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <Eye className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
             <span>Jump to Preview</span>
           </button>
         </div>
@@ -762,11 +762,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
       <section
         ref={step1Ref}
         aria-labelledby="step-1-heading"
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden"
+        className="wwcf-glass-card rounded-2xl shadow-xs overflow-hidden"
       >
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-black/40">
+        <div className="p-4 sm:p-5 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-3 bg-slate-50/70 dark:bg-[#0b0e13]/70">
           <div className="flex items-center gap-3">
-            <span className="w-7 h-7 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+            <span className="w-7 h-7 rounded-xl bg-[#1b75bc] text-white font-bold tabular-nums text-xs flex items-center justify-center shrink-0 shadow-2xs">
               1
             </span>
             <div>
@@ -790,7 +790,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             onClick={() => setIsServicesPanelExpanded(!isServicesPanelExpanded)}
             className="py-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
-            <Music className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <Music className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
             <span>
               Services ({scope.selectedServiceTypes.length}/{CANONICAL_SERVICE_TYPES.length})
             </span>
@@ -986,10 +986,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               className="w-full p-3 bg-slate-50/70 dark:bg-black/50 hover:bg-slate-100 dark:hover:bg-slate-800/60 flex items-center justify-between text-left transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                <Calendar className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                 <span>Choose specific months or weeks (Hierarchical Tree)</span>
                 {scope.selectedScheduleIds.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold tabular-nums bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2]">
                     {scope.selectedScheduleIds.length} checked
                   </span>
                 )}
@@ -1193,8 +1193,8 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                         onClick={() => toggleEveryMonthAcrossYears(idx + 1)}
                         className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer shadow-2xs ${
                           isSelected
-                            ? 'bg-blue-600 text-white border-blue-600 font-bold'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-300 text-slate-700 dark:text-slate-300'
+                            ? 'bg-[#1b75bc] text-white border-[#1b75bc] font-bold'
+                            : 'bg-white dark:bg-[#11161e] border-slate-200 dark:border-white/10 hover:bg-[#f0f7fc] hover:text-[#1b75bc] dark:hover:bg-[#0f2b44] dark:hover:text-[#54b0e2] text-slate-700 dark:text-slate-300'
                         }`}
                       >
                         All {mLabel}
@@ -1208,16 +1208,16 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
           {/* Collapsible Canonical Services Panel */}
           {isServicesPanelExpanded && (
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-black/40 space-y-2.5">
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-[#0b0e13]/70 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Music className="w-3.5 h-3.5 text-blue-600" />
+                  <Music className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                   Canonical Service Types
                 </span>
                 <button
                   type="button"
                   onClick={handleSelectAllServices}
-                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                  className="text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] hover:underline cursor-pointer"
                 >
                   Select All Services
                 </button>
@@ -1231,15 +1231,15 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                       key={st}
                       className={`flex items-center gap-2 cursor-pointer p-2.5 rounded-lg border transition-colors ${
                         isChecked
-                          ? 'bg-blue-50/70 dark:bg-blue-950/40 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-blue-200 font-semibold'
-                          : 'bg-white dark:bg-black border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300'
+                          ? 'bg-[#f0f7fc] dark:bg-[#0f2b44]/60 border-[#1b75bc]/40 dark:border-[#54b0e2]/40 text-[#1b75bc] dark:text-[#54b0e2] font-semibold'
+                          : 'bg-white dark:bg-[#11161e] border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => toggleServiceType(st)}
-                        className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer"
                       />
                       <span>{st}</span>
                     </label>
@@ -1264,11 +1264,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
       <section
         ref={step2Ref}
         aria-labelledby="step-2-heading"
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden"
+        className="wwcf-glass-card rounded-2xl shadow-xs overflow-hidden"
       >
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/60 dark:bg-black/40">
+        <div className="p-4 sm:p-5 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between gap-3 bg-slate-50/70 dark:bg-[#0b0e13]/70">
           <div className="flex items-center gap-3">
-            <span className="w-7 h-7 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+            <span className="w-7 h-7 rounded-xl bg-[#1b75bc] text-white font-bold tabular-nums text-xs flex items-center justify-center shrink-0 shadow-2xs">
               2
             </span>
             <div>
@@ -1345,7 +1345,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                   <button
                     type="button"
                     onClick={handleSelectAllSections}
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-medium"
+                    className="text-xs text-[#1b75bc] dark:text-[#54b0e2] hover:underline cursor-pointer font-medium"
                   >
                     Select All
                   </button>
@@ -1373,7 +1373,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.summaryMetrics}
                 onChange={() => toggleSection('summaryMetrics')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1397,7 +1397,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.mostPlayedRanking}
                 onChange={() => toggleSection('mostPlayedRanking')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1421,7 +1421,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.songLeaderUsage}
                 onChange={() => toggleSection('songLeaderUsage')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1445,7 +1445,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.sameMonthRepeats}
                 onChange={() => toggleSection('sameMonthRepeats')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1469,7 +1469,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.lineupRegister}
                 onChange={() => toggleSection('lineupRegister')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1493,7 +1493,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.assignedMembers}
                 onChange={() => toggleSection('assignedMembers')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1517,7 +1517,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                 type="checkbox"
                 checked={sections.lessUsedSongs}
                 onChange={() => toggleSection('lessUsedSongs')}
-                className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer mt-0.5"
+                className="rounded text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer mt-0.5"
               />
               <div>
                 <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">
@@ -1555,9 +1555,9 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
       ───────────────────────────────────────────────────────────── */}
       <section ref={previewRef} aria-labelledby="step-3-heading" className="space-y-4">
         {/* Scope Recap & Action Bar */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="wwcf-glass-card rounded-2xl p-4 sm:p-5 shadow-xs flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="w-7 h-7 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+            <span className="w-7 h-7 rounded-xl bg-[#1b75bc] text-white font-bold tabular-nums text-xs flex items-center justify-center shrink-0 shadow-2xs">
               3
             </span>
             <div>
@@ -1714,7 +1714,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
 
         {/* USEFUL EMPTY STATE / INVALID DATE STATE */}
         {isDateRangeInvalid ? (
-          <div className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
+          <div className="wwcf-glass-card border-rose-200 dark:border-rose-900/60 rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
             <div className="w-14 h-14 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 mx-auto flex items-center justify-center">
               <AlertCircle className="w-7 h-7" />
             </div>
@@ -1730,7 +1730,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={handleSelectThisMonth}
-                className="py-2 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs"
+                className="btn-tactile py-2 px-3.5 rounded-xl bg-[#1b75bc] hover:bg-[#165d97] text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs"
               >
                 Set to This Month
               </button>
@@ -1751,7 +1751,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             </div>
           </div>
         ) : filteredSchedules.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
+          <div className="wwcf-glass-card rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
             <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 mx-auto flex items-center justify-center">
               <CalendarRange className="w-7 h-7" />
             </div>
@@ -1773,7 +1773,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
               <button
                 type="button"
                 onClick={handleSelectAllHistory}
-                className="py-2 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs"
+                className="btn-tactile py-2 px-3.5 rounded-xl bg-[#1b75bc] hover:bg-[#165d97] text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs"
               >
                 View All History
               </button>
@@ -1801,7 +1801,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             </div>
           </div>
         ) : activeSectionsCount === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
+          <div className="wwcf-glass-card rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-xs">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 mx-auto flex items-center justify-center">
               <CheckSquare className="w-7 h-7" />
             </div>
@@ -1816,7 +1816,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             <button
               type="button"
               onClick={handleSelectStandardSections}
-              className="py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs inline-flex items-center gap-1.5"
+              className="btn-tactile py-2 px-4 rounded-xl bg-[#1b75bc] hover:bg-[#165d97] text-white font-semibold text-xs transition-colors cursor-pointer shadow-2xs inline-flex items-center gap-1.5"
             >
               <Check className="w-4 h-4" />
               <span>Enable Standard (All 7 Sections)</span>
@@ -1826,6 +1826,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
           /* THE OFFICIAL PRINTABLE REPORT CONTAINER */
           <div
             ref={reportRef}
+            data-wwcf-export-surface="true"
             className="space-y-6 bg-white text-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs"
           >
             {/* Formal Report Header */}
@@ -2139,6 +2140,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                         ? allScheduleLeaders.map((m) => m.name).join(', ')
                         : 'Unassigned';
                     const isUpcoming = schedule.serviceDate > getManilaTodayString();
+                    const resolvedTitles = resolveScheduleSongTitles(schedule, songs);
 
                     return (
                       <div
@@ -2182,12 +2184,12 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                               Praise Songs:
                             </span>
                             <div className="space-y-0.5">
-                              {(schedule.praiseSongs || []).map((song, sIdx) => {
+                              {resolvedTitles.praiseSongs.map((songTitle, sIdx) => {
                                 const keyTag = schedule.praiseSongKeys?.[sIdx];
                                 return (
                                   <div key={sIdx} className="flex items-center gap-1.5 text-slate-800 font-medium">
                                     <span>
-                                      {sIdx + 1}. {song}
+                                      {sIdx + 1}. {songTitle}
                                     </span>
                                     {keyTag && (
                                       <span className="text-[10px] font-bold px-1.5 rounded bg-slate-200 text-slate-700">
@@ -2205,12 +2207,12 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                               Worship Songs:
                             </span>
                             <div className="space-y-0.5">
-                              {(schedule.worshipSongs || []).map((song, sIdx) => {
+                              {resolvedTitles.worshipSongs.map((songTitle, sIdx) => {
                                 const keyTag = schedule.worshipSongKeys?.[sIdx];
                                 return (
                                   <div key={sIdx} className="flex items-center gap-1.5 text-slate-800 font-medium">
                                     <span>
-                                      {sIdx + 1}. {song}
+                                      {sIdx + 1}. {songTitle}
                                     </span>
                                     {keyTag && (
                                       <span className="text-[10px] font-bold px-1.5 rounded bg-slate-200 text-slate-700">
@@ -2421,11 +2423,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
                                 {row.artist}
                               </div>
                             </td>
-                            <td className="py-2 px-2 text-center font-bold text-[#1b75bc] dark:text-[#5aa7e8] border-r border-slate-200 dark:border-white/10">
+                            <td className="py-2 px-2 text-center font-bold tabular-nums text-[#1b75bc] dark:text-[#54b0e2] border-r border-slate-200 dark:border-white/10">
                               {row.totalPlays}x
                             </td>
                             {rotationTimelineData.sortedSchedules.map((s) => {
-                              const detail = row.dateDetails.get(s.serviceDate);
+                              const detail = row.dateDetails.get(s.id);
                               if (!detail) {
                                 return (
                                   <td
@@ -2475,11 +2477,11 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
       ───────────────────────────────────────────────────────────── */}
       <section
         aria-labelledby="step-4-heading"
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        className="wwcf-glass-card rounded-2xl p-4 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
       >
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+            <span className="w-6 h-6 rounded-lg bg-[#1b75bc] text-white font-bold tabular-nums text-xs flex items-center justify-center shrink-0">
               4
             </span>
             <h3 id="step-4-heading" className="text-sm font-bold text-slate-900 dark:text-slate-100">
@@ -2500,7 +2502,7 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             type="button"
             onClick={handleExportPDF}
             disabled={isExportDisabled}
-            className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-tactile py-2.5 px-4 bg-[#1b75bc] hover:bg-[#165d97] text-white text-xs font-bold rounded-xl shadow-2xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             title={isDateRangeInvalid ? 'Start date cannot be after end date' : 'Export PDF'}
           >
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
@@ -2511,10 +2513,10 @@ export const SongAnalyticsView: React.FC<SongAnalyticsViewProps> = ({
             type="button"
             onClick={handleExportPNG}
             disabled={isExportDisabled}
-            className="py-2.5 px-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-xl shadow-2xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-tactile py-2.5 px-4 bg-white dark:bg-[#11161e] hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 text-xs font-bold rounded-xl shadow-2xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             title={isDateRangeInvalid ? 'Start date cannot be after end date' : 'Export PNG'}
           >
-            <ImageIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <ImageIcon className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
             <span>Export High-Res PNG</span>
           </button>
         </div>

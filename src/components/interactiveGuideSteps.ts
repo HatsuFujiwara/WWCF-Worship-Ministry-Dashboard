@@ -307,11 +307,11 @@ export const INTERACTIVE_GUIDE_STEPS: TourStep[] = [
     targetSelector: '[data-tour="theme-toggle"]',
     actionPrompt: 'Customize themes and guide options.',
     actionType: 'none',
-    description: 'Toggle Light, Dark, or AMOLED themes and configure guide preferences.',
+    description: 'Choose Light or Dark mode, optional Dark-only true-black AMOLED canvas, and frosted Glass Mode effects.',
     bullets: [
-      'Choose visual theme options suited for sanctuary or stage lighting.',
-      'Configure Interactive Guide behavior for new users.',
-      'Customize default preferences and app behavior.'
+      'Light or Dark Mode: Choose standard daylight or layered dark workspace surfaces.',
+      'AMOLED (Dark Mode only): Uses a true #000000 black canvas while keeping WWCF colors and optional Glass Mode.',
+      'Performance Mode: Automatically suspends Glass Mode, blur, shadows, and non-essential animations.'
     ],
     rule: 'Help Topic: Settings.'
   },
@@ -1064,15 +1064,16 @@ export const INTERACTIVE_GUIDE_STEPS: TourStep[] = [
   {
     id: 392,
     sectionTitle: 'Advanced Guide — Settings & Themes',
-    stepTitle: 'Light Theme vs AMOLED Dark Mode',
+    stepTitle: 'Light & Dark Themes, AMOLED & Glass Mode',
     targetTab: 'dashboard',
     targetSelector: '[data-tour="theme-toggle"]',
-    actionPrompt: 'Toggle between Light Theme and pure AMOLED Dark Mode.',
+    actionPrompt: 'Choose Light or Dark mode and customize AMOLED or Glass Mode surface effects.',
     actionType: 'click',
-    description: 'Select the optimal display mode for your environment.',
+    description: 'Select the optimal display mode and surface finish for your environment.',
     bullets: [
-      'Light Theme: Clean, high-contrast daylight theme for office and planning.',
-      'AMOLED Dark Mode: Pure #000000 background engineered for sanctuary stage lighting and battery saving.'
+      'Light & Dark Mode: Clean daylight planning canvas or layered low-light dark theme.',
+      'AMOLED (Dark Mode only): True #000000 OLED canvas that retains WWCF brand blue, status colors, and visual depth.',
+      'Glass Mode (Default OFF): Optional frosted translucent navigation, modals, toolbars, and featured cards across Light, Dark, and AMOLED (suspended only when Performance Mode is ON).'
     ],
     rule: 'Settings Guide 3: Display themes.'
   }

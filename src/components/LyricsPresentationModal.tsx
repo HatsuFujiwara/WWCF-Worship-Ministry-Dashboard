@@ -819,7 +819,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
           <button
             type="button"
             onClick={() => setShowMobileSetlist((prev) => !prev)}
-            className="lg:hidden inline-flex items-center justify-center p-2 min-h-[44px] min-w-[44px] rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+            className="lg:hidden inline-flex items-center justify-center p-2 min-h-[44px] min-w-[44px] rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             aria-label="Toggle service setlist"
             aria-expanded={showMobileSetlist}
             title="Toggle service setlist"
@@ -850,7 +850,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
           <button
             type="button"
             onClick={handleOpenAudienceOutput}
-            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-[#1b75bc] hover:bg-[#155d97] text-white text-xs font-bold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-[#1b75bc] hover:bg-[#155d97] text-white text-xs font-bold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             <ExternalLink className="w-3.5 h-3.5 shrink-0" />
             <span>
@@ -866,7 +866,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             type="button"
             onClick={handleCopyOutputUrl}
             aria-label="Copy Audience Output URL for another window on this device"
-            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             title="Copy Audience Output URL for another browser window on this device and browser profile"
           >
             {copiedUrl ? (
@@ -881,7 +881,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             type="button"
             onClick={() => setShowMirrorOverlay(true)}
             aria-label="Open in-app Audience Mirror"
-            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             title="Open full-screen in-app Audience Mirror (useful for mobile or single-screen setups)"
           >
             <Maximize2 className="w-3.5 h-3.5 shrink-0" />
@@ -891,7 +891,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
           <button
             type="button"
             onClick={() => setIsBlanked((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl border text-xs font-bold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
               isBlanked
                 ? 'bg-amber-500 text-black border-amber-400 hover:bg-amber-400'
                 : 'bg-white/10 hover:bg-white/20 text-white border-white/15'
@@ -907,7 +907,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             type="button"
             onClick={cleanupSessionAndClose}
             aria-label="End Presentation and close presenter"
-            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-rose-200 text-xs font-bold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-rose-200 text-xs font-bold transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             title="End presentation session and close presenter"
           >
             <X className="w-4 h-4 shrink-0" />
@@ -963,7 +963,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             <button
               type="button"
               onClick={() => setDisplaySettings((prev) => ({ ...prev, textAlign: 'center' }))}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                 displaySettings.textAlign === 'center'
                   ? 'bg-[#1b75bc] text-white'
                   : 'text-white/70 hover:text-white'
@@ -974,7 +974,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             <button
               type="button"
               onClick={() => setDisplaySettings((prev) => ({ ...prev, textAlign: 'left' }))}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                 displaySettings.textAlign === 'left'
                   ? 'bg-[#1b75bc] text-white'
                   : 'text-white/70 hover:text-white'
@@ -1033,14 +1033,14 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             <button
               type="button"
               onClick={handleCopyOutputUrl}
-              className="px-3 py-1.5 min-h-[44px] rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-100 font-semibold cursor-pointer"
+              className="px-3 py-1.5 min-h-[44px] rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-100 font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             >
               Copy Output URL
             </button>
             <button
               type="button"
               onClick={() => setShowMirrorOverlay(true)}
-              className="px-3 py-1.5 min-h-[44px] rounded-lg bg-white/15 hover:bg-white/25 text-white font-semibold cursor-pointer"
+              className="px-3 py-1.5 min-h-[44px] rounded-lg bg-white/15 hover:bg-white/25 text-white font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
             >
               Open Audience Mirror
             </button>
@@ -1073,7 +1073,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
           <button
             type="button"
             onClick={() => setManualCopyUrl(null)}
-            className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold cursor-pointer shrink-0 self-end sm:self-center"
+            className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold cursor-pointer shrink-0 self-end sm:self-center focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             Dismiss
           </button>
@@ -1120,7 +1120,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                     key={song.slotId}
                     type="button"
                     onClick={() => handleSelectSong(idx)}
-                    className={`w-full text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+                    className={`w-full text-left p-3 rounded-xl border transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                       isActive
                         ? 'bg-[#1b75bc]/20 border-[#1b75bc] text-white'
                         : 'bg-[#121212] border-white/10 hover:border-white/25 text-white/85'
@@ -1193,7 +1193,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                         setSelectedSlideIdx(firstSlideIndex);
                         setShowMobileSetlist(false);
                       }}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors ${
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                         isSectionActive
                           ? 'bg-[#1b75bc] border-[#1b75bc] text-white'
                           : 'bg-[#181818] border-white/10 hover:border-white/30 text-white/80'
@@ -1249,7 +1249,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                         <button
                           type="button"
                           onClick={() => setIsBlanked(false)}
-                          className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold hover:bg-amber-300 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold hover:bg-amber-300 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
                         >
                           Show Slide
                         </button>
@@ -1334,7 +1334,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                         <button
                           type="button"
                           onClick={handleNextSlide}
-                          className="w-full py-2 min-h-[40px] rounded-xl bg-[#1b75bc]/20 hover:bg-[#1b75bc]/30 border border-[#1b75bc]/40 text-[#54b0e2] text-xs font-bold cursor-pointer transition-colors"
+                          className="w-full py-2 min-h-[40px] rounded-xl bg-[#1b75bc]/20 hover:bg-[#1b75bc]/30 border border-[#1b75bc]/40 text-[#54b0e2] text-xs font-bold cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
                         >
                           Advance to Next Slide
                         </button>
@@ -1372,7 +1372,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                                 key={slide.id}
                                 type="button"
                                 onClick={() => setSelectedSlideIdx(slide.globalIndex)}
-                                className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between gap-2 min-h-[104px] ${
+                                className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between gap-2 min-h-[104px] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2] ${
                                   isSelected
                                     ? 'bg-[#1b75bc]/25 border-[#54b0e2] text-white'
                                     : 'bg-[#121212] border-white/10 hover:border-white/30 text-white/85'
@@ -1411,7 +1411,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             onClick={handlePrevSong}
             disabled={selectedSongIdx <= 0}
             aria-label="Previous song"
-            className="inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-semibold cursor-pointer"
+            className="inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             <ChevronLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Prev Song</span>
@@ -1422,7 +1422,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             onClick={handlePrevSlide}
             disabled={!hasPrevSlide}
             aria-label="Previous slide"
-            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-xl bg-white/15 hover:bg-white/25 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-bold cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-xl bg-white/15 hover:bg-white/25 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-bold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             <ChevronLeft className="w-4 h-4" />
             <span>Prev Slide</span>
@@ -1449,7 +1449,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             onClick={handleNextSlide}
             disabled={!hasNextSlide}
             aria-label="Next slide"
-            className="inline-flex items-center gap-1.5 px-5 py-2 min-h-[44px] rounded-xl bg-[#1b75bc] hover:bg-[#155d97] disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-bold cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-5 py-2 min-h-[44px] rounded-xl bg-[#1b75bc] hover:bg-[#155d97] disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-bold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             <span>Next Slide</span>
             <ChevronRight className="w-4 h-4" />
@@ -1460,7 +1460,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
             onClick={handleNextSong}
             disabled={selectedSongIdx >= songs.length - 1}
             aria-label="Next song"
-            className="inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-semibold cursor-pointer"
+            className="inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed text-white text-xs font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
           >
             <span className="hidden sm:inline">Next Song</span>
             <ChevronRight className="w-4 h-4" />
@@ -1486,7 +1486,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                 type="button"
                 onClick={handlePrevSlide}
                 disabled={!hasPrevSlide}
-                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 text-xs font-semibold cursor-pointer"
+                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 text-xs font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
               >
                 Prev
               </button>
@@ -1494,14 +1494,14 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                 type="button"
                 onClick={handleNextSlide}
                 disabled={!hasNextSlide}
-                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-[#1b75bc] hover:bg-[#155d97] disabled:opacity-35 text-xs font-bold cursor-pointer"
+                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-[#1b75bc] hover:bg-[#155d97] disabled:opacity-35 text-xs font-bold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
               >
                 Next
               </button>
               <button
                 type="button"
                 onClick={() => setIsBlanked((prev) => !prev)}
-                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold cursor-pointer"
+                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
               >
                 {isBlanked ? 'Show Slide' : 'Blank'}
               </button>
@@ -1509,7 +1509,7 @@ export const LyricsPresentationModal: React.FC<LyricsPresentationModalProps> = (
                 ref={mirrorExitButtonRef}
                 type="button"
                 onClick={() => setShowMirrorOverlay(false)}
-                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/15 hover:bg-white/25 text-xs font-bold cursor-pointer"
+                className="px-3.5 py-2 min-h-[44px] rounded-lg bg-white/15 hover:bg-white/25 text-xs font-bold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#54b0e2]"
               >
                 Exit Mirror
               </button>

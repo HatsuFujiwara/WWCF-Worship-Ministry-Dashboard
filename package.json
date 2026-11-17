@@ -1,8 +1,8 @@
 {
-  "name": "react-example",
+  "name": "wwcf-worship-song-line-up-scheduler",
   "private": true,
   "version": "2.5.0",
-  "description": "WWCF Santa Cruz Worship Ministry Dashboard",
+  "description": "WWCF Worship Song Line-up Scheduler",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

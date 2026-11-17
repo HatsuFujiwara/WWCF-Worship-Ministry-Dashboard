@@ -60,6 +60,9 @@ export interface RemoteConflictPayload {
       schedules?: Schedule[];
       labels?: string[];
       songFamilies?: SongFamily[];
+      templates?: LineupTemplate[];
+      memberAvailability?: MemberAvailability[];
+      songFamiliarity?: SongFamiliarity[];
       draftSchedule?: any;
     };
   };
@@ -82,6 +85,9 @@ export interface SaveToDriveResult {
     members: number;
     families: number;
     labels: number;
+    templates: number;
+    availability: number;
+    familiarity: number;
   };
   conflictPayload?: RemoteConflictPayload;
   error?: string;
@@ -98,6 +104,9 @@ export interface BackupPreviewResult {
     members: number;
     families: number;
     labels: number;
+    templates: number;
+    availability: number;
+    familiarity: number;
     hasDraft: boolean;
   };
   error?: string;
@@ -665,7 +674,7 @@ export class GoogleAuthService {
     const draftSchedule = includeDraft ? StorageService.getDraftSchedule() : null;
 
     const payload = {
-      app: 'WWCF Santa Cruz Worship Ministry',
+      app: 'WWCF Worship Song Line-up Scheduler',
       version: '1.0',
       exportedAt: new Date().toISOString(),
       data: {
@@ -704,7 +713,7 @@ export class GoogleAuthService {
     const metadata = {
       name: BACKUP_FILENAME,
       mimeType: 'application/json',
-      description: 'WWCF Santa Cruz Worship Ministry Dashboard automated cloud backup'
+      description: 'WWCF Worship Song Line-up Scheduler automated cloud backup'
     };
 
     const multipartRequestBody =
@@ -947,7 +956,7 @@ export class GoogleAuthService {
       const metadata = {
         name: filename,
         mimeType: 'application/json',
-        description: 'WWCF Santa Cruz Worship Ministry Dashboard separate cloud backup copy'
+        description: 'WWCF Worship Song Line-up Scheduler separate cloud backup copy'
       };
 
       const multipartRequestBody =
@@ -1028,13 +1037,19 @@ export class GoogleAuthService {
     const schedules = StorageService.getSchedules();
     const songFamilies = await SongFamilyService.getSongFamilies();
     const labels = StorageService.getLabels();
+    const templates = TemplateService.getTemplatesSync();
+    const memberAvailability = AvailabilityService.getAvailabilityListSync();
+    const songFamiliarity = FamiliarityService.getFamiliarityListSync();
 
     const localCounts = {
       songs: songs.length,
       schedules: schedules.length,
       members: members.length,
       families: songFamilies.length,
-      labels: labels.length
+      labels: labels.length,
+      templates: templates.length,
+      availability: memberAvailability.length,
+      familiarity: songFamiliarity.length
     };
 
     if (isSyncInProgress) {

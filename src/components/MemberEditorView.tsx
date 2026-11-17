@@ -44,7 +44,8 @@ import {
   Clock,
   FileText,
   AlertOctagon,
-  CheckCircle2
+  CheckCircle2,
+  Lock
 } from 'lucide-react';
 
 interface MemberEditorViewProps {
@@ -603,7 +604,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
   return (
     <div data-tour="members-view" className="space-y-6 animate-in fade-in duration-300">
       <div className="w-full space-y-4">
-        <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="p-5 sm:p-6 rounded-2xl wwcf-glass-card shadow-xs space-y-4">
           {/* Header, Search, Sort By, Filter Labels & Clear Filters */}
           <div className="space-y-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -634,7 +635,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search Members..."
-                    className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -662,7 +663,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                       value={statusFilter}
                       data-tour="member-filter-select"
                       onChange={(e) => setStatusFilter(e.target.value as MemberStatusFilter)}
-                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer"
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none cursor-pointer transition-all"
                     >
                       <option value="all">All Members</option>
                       <option value="active">Active</option>
@@ -673,14 +674,14 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   {/* Sort By Dropdown */}
                   <div className="flex items-center gap-1.5">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap flex items-center gap-1">
-                      <ArrowUpDown className="w-3.5 h-3.5 text-indigo-500" />
+                      <ArrowUpDown className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                       <span>Sort By:</span>
                     </label>
                     <select
                       value={sortOption}
                       data-tour="member-sort-select"
                       onChange={(e) => handleSortChange(e.target.value as MemberSortOption)}
-                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer"
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none cursor-pointer transition-all"
                     >
                       <option value="name-asc">Name (A → Z)</option>
                       <option value="name-desc">Name (Z → A)</option>
@@ -696,14 +697,14 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   {/* Filter Labels Dropdown */}
                   <div className="relative flex items-center gap-1.5" ref={filterDropdownRef}>
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap flex items-center gap-1">
-                      <Filter className="w-3.5 h-3.5 text-indigo-500" />
+                      <Filter className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
                       <span>Filter Labels:</span>
                     </label>
 
                     <button
                       type="button"
                       onClick={() => setIsFilterDropdownOpen((prev) => !prev)}
-                      className="inline-flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer min-w-[130px]"
+                      className="inline-flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#11161e] text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer min-w-[130px]"
                     >
                       <span className="truncate">
                         {filterLabels.length === 0
@@ -717,21 +718,21 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
 
                     {/* Filter Popover Dropdown */}
                     {isFilterDropdownOpen && (
-                      <div className="absolute top-full left-0 mt-1.5 w-60 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl z-30 space-y-1 animate-in fade-in slide-in-from-top-2 duration-150">
+                      <div className="absolute top-full left-0 mt-1.5 w-60 p-2.5 rounded-xl bg-white dark:bg-[#11161e] border border-slate-200 dark:border-white/10 shadow-xl z-30 space-y-1 animate-in fade-in slide-in-from-top-2 duration-150">
                         <button
                           type="button"
                           onClick={() => setFilterLabels([])}
                           className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                             filterLabels.length === 0
-                              ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400'
-                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              ? 'bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2]'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5'
                           }`}
                         >
                           <span>All Labels (Show All)</span>
-                          {filterLabels.length === 0 && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                          {filterLabels.length === 0 && <Check className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />}
                         </button>
 
-                        <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                        <div className="my-1 border-t border-slate-100 dark:border-white/10" />
 
                         <div className="max-h-52 overflow-y-auto space-y-0.5">
                           {sortTags(labels).map((lbl) => {
@@ -739,14 +740,14 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                             return (
                               <label
                                 key={lbl}
-                                className="flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer text-slate-700 dark:text-slate-300 font-medium select-none"
+                                className="flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer text-slate-700 dark:text-slate-300 font-medium select-none"
                               >
                                 <div className="flex items-center gap-2">
                                   <input
                                     type="checkbox"
                                     checked={isChecked}
                                     onChange={() => toggleFilterLabel(lbl)}
-                                    className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer"
                                   />
                                   <span>{lbl}</span>
                                 </div>
@@ -779,13 +780,13 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   {sortTags(filterLabels).map((lbl) => (
                     <span
                       key={lbl}
-                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/80"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/25 dark:border-[#54b0e2]/25"
                     >
                       <span>{lbl}</span>
                       <button
                         type="button"
                         onClick={() => toggleFilterLabel(lbl)}
-                        className="hover:text-indigo-900 dark:hover:text-white cursor-pointer ml-0.5"
+                        className="hover:text-[#165d97] dark:hover:text-white cursor-pointer ml-0.5"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -806,7 +807,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
           {/* 🌟 Universal Action Buttons Toolbar */}
           <div
             data-tour="member-bulk-actions"
-            className="sticky top-[73px] sm:top-[77px] z-20 flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700 shadow-sm transition-all"
+            className="sticky top-[73px] sm:top-[77px] z-20 flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl wwcf-toolbar-sticky shadow-sm transition-all"
           >
             <div className="flex items-center gap-3">
               <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
@@ -817,13 +818,13 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                     if (el) el.indeterminate = isSomeSelected;
                   }}
                   onChange={() => toggleSelectAll(filteredMembers)}
-                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer"
                 />
                 <span>Select All ({filteredMembers.length})</span>
               </label>
 
               {selectedCount > 0 && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                <span className="px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] border border-[#1b75bc]/25 dark:border-[#54b0e2]/25">
                   {selectedCount} selected
                 </span>
               )}
@@ -841,7 +842,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                         handleEditClick(selectedMembers[0]);
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg border bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs transition-all cursor-pointer select-none btn-press-feedback"
+                    className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border bg-[#1b75bc] hover:bg-[#165d97] text-white border-[#1b75bc] shadow-xs transition-all cursor-pointer select-none"
                     title="Edit selected member"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
@@ -901,7 +902,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
             )}
           </div>
 
-          <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="p-5 sm:p-6 rounded-2xl wwcf-glass-card shadow-xs overflow-hidden">
             {filteredMembers.length === 0 ? (
               members.length === 0 ? (
                 <div className="p-12 text-center text-slate-500 dark:text-slate-400 space-y-2">
@@ -1003,7 +1004,17 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
             ? 'Delete this member?'
             : `Delete ${bulkDeleteConfig.targets.length} Selected Members?`
         }
-        message="This will remove the member from the roster. Historical saved line-ups will remain preserved."
+        message={
+          bulkDeleteConfig.affectedSchedulesCount > 0
+            ? `${
+                bulkDeleteConfig.targets.length === 1 ? 'This member appears' : 'Selected members appear'
+              } in ${bulkDeleteConfig.affectedSchedulesCount} saved line-up${
+                bulkDeleteConfig.affectedSchedulesCount > 1 ? 's' : ''
+              }. Removing ${
+                bulkDeleteConfig.targets.length === 1 ? 'them' : 'these members'
+              } from the roster will preserve all historical saved line-ups.`
+            : 'This will remove the member from the roster. Historical saved line-ups will remain preserved.'
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         isDanger={true}
@@ -1018,13 +1029,13 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
           style={{ zIndex: disciplinaryZIndex }}
           data-overlay-id="disciplinary-action-modal"
           data-overlay-topmost={isDisciplinaryTopmost}
-          className={`fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200 transition-opacity ${
+          className={`fixed inset-0 bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200 transition-opacity ${
             isDisciplinaryBlocked ? 'pointer-events-none select-none opacity-40' : ''
           }`}
           aria-hidden={isDisciplinaryBlocked}
           inert={isDisciplinaryBlocked ? true : undefined}
         >
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden space-y-0">
+          <div className="w-full max-w-lg wwcf-glass-modal rounded-2xl shadow-2xl overflow-hidden space-y-0">
             {/* Modal Header */}
             <div className="p-5 bg-rose-50/50 dark:bg-rose-950/30 border-b border-rose-100 dark:border-rose-900/50 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1140,7 +1151,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-indigo-500" />
+                        <Clock className="w-3 h-3 text-[#1b75bc] dark:text-[#54b0e2]" />
                         <span>Duration</span>
                       </label>
                       <input
@@ -1148,7 +1159,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                         min={1}
                         value={dispDurationValue}
                         onChange={(e) => setDispDurationValue(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                        className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0b0e13] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none"
                         required
                       />
                     </div>
@@ -1160,7 +1171,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                       <select
                         value={dispDurationType}
                         onChange={(e) => setDispDurationType(e.target.value as DisciplinaryDurationType)}
-                        className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer"
+                        className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0b0e13] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none cursor-pointer"
                       >
                         <option value="days">Days</option>
                         <option value="weeks">Weeks</option>
@@ -1174,14 +1185,14 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-indigo-500" />
+                        <Calendar className="w-3 h-3 text-[#1b75bc] dark:text-[#54b0e2]" />
                         <span>Start Date</span>
                       </label>
                       <input
                         type="date"
                         value={dispStartDate}
                         onChange={(e) => setDispStartDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer"
+                        className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0b0e13] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none cursor-pointer"
                         required
                       />
                     </div>
@@ -1190,7 +1201,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                         End Date (Auto)
                       </label>
-                      <div className="px-3 py-2 text-xs font-bold rounded-lg border border-rose-200/80 dark:border-rose-900/80 bg-rose-50/60 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 flex items-center justify-between">
+                      <div className="px-3 py-2 text-xs font-bold rounded-xl border border-rose-200/80 dark:border-rose-900/80 bg-rose-50/60 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 flex items-center justify-between">
                         <span>{computedEndDate}</span>
                         <span className="text-[10px] font-normal text-rose-500">Calculated</span>
                       </div>
@@ -1200,7 +1211,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   {/* Reason Textarea */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                      <FileText className="w-3 h-3 text-indigo-500" />
+                      <FileText className="w-3 h-3 text-[#1b75bc] dark:text-[#54b0e2]" />
                       <span>Reason / Internal Notes (Optional)</span>
                     </label>
                     <textarea
@@ -1208,7 +1219,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                       value={dispReason}
                       onChange={(e) => setDispReason(e.target.value)}
                       placeholder="e.g. Repeated absences, conduct issue, or personal leave..."
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0b0e13] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none resize-none"
                     />
                   </div>
                 </div>
@@ -1242,14 +1253,14 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
           style={{ zIndex: exactDuplicateZIndex }}
           data-overlay-id="exact-duplicate-member-modal"
           data-overlay-topmost={isExactDuplicateTopmost}
-          className={`fixed inset-0 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200 transition-opacity ${
+          className={`fixed inset-0 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-xs animate-in fade-in duration-200 transition-opacity ${
             isExactDuplicateBlocked ? 'pointer-events-none select-none opacity-40' : ''
           }`}
           aria-hidden={isExactDuplicateBlocked}
           inert={isExactDuplicateBlocked ? true : undefined}
         >
           <div
-            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden transform animate-in zoom-in-95 duration-200"
+            className="w-full max-w-md wwcf-glass-modal rounded-2xl shadow-xl overflow-hidden transform animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-amber-50/60 dark:bg-amber-950/20">
@@ -1311,7 +1322,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                   handleEditClick(memberToEdit);
                   showToast(`Loaded existing member "${memberToEdit.name}" for editing.`, 'info');
                 }}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 Edit Existing Member
               </button>
@@ -1327,19 +1338,19 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
           style={{ zIndex: similarMatchZIndex }}
           data-overlay-id="similar-match-member-modal"
           data-overlay-topmost={isSimilarMatchTopmost}
-          className={`fixed inset-0 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200 transition-opacity ${
+          className={`fixed inset-0 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-xs animate-in fade-in duration-200 transition-opacity ${
             isSimilarMatchBlocked ? 'pointer-events-none select-none opacity-40' : ''
           }`}
           aria-hidden={isSimilarMatchBlocked}
           inert={isSimilarMatchBlocked ? true : undefined}
         >
           <div
-            className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden transform animate-in zoom-in-95 duration-200"
+            className="w-full max-w-lg wwcf-glass-modal rounded-2xl shadow-xl overflow-hidden transform animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-indigo-50/60 dark:bg-indigo-950/30">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-white/10 bg-[#f0f7fc]/80 dark:bg-[#0f2b44]/60">
               <div className="flex items-center gap-2.5">
-                <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <Users className="w-5 h-5 text-[#1b75bc] dark:text-[#54b0e2] shrink-0" />
                 <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base">
                   A similar member already exists.
                 </h3>
@@ -1353,8 +1364,8 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 text-xs space-y-2">
-                <div className="text-[11px] uppercase tracking-wider font-bold text-indigo-600 dark:text-indigo-400">
+              <div className="p-4 rounded-xl border border-[#1b75bc]/20 dark:border-[#54b0e2]/20 bg-[#f0f7fc]/60 dark:bg-[#0f2b44]/40 text-xs space-y-2">
+                <div className="text-[11px] uppercase tracking-wider font-bold text-[#1b75bc] dark:text-[#54b0e2]">
                   Possible match:
                 </div>
                 <div className="font-bold text-slate-900 dark:text-slate-100 text-base">
@@ -1365,7 +1376,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                     {similarMatchData.existingMember.labels.map((l) => (
                       <span
                         key={l}
-                        className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-indigo-100 dark:bg-indigo-900/80 text-indigo-800 dark:text-indigo-300"
+                        className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-[#1b75bc]/15 dark:bg-[#1b75bc]/25 text-[#1b75bc] dark:text-[#54b0e2]"
                       >
                         {l}
                       </span>
@@ -1400,7 +1411,7 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmMergeSimilar}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-white bg-[#1b75bc] hover:bg-[#165d97] rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 Merge with Existing
               </button>
@@ -1516,8 +1527,8 @@ export const MemberEditorView: React.FC<MemberEditorViewProps> = ({
                             {isSelectedLabel && <Check className="w-3 h-3" />}
                             <span>{label}</span>
                             {isUniqueConflict && (
-                              <span className="text-[10px] text-slate-400 dark:text-slate-500" title="Single-holder role">
-                                🔒
+                              <span className="inline-flex items-center text-slate-400 dark:text-slate-500" title="Single-holder role">
+                                <Lock className="w-3 h-3" aria-hidden="true" />
                               </span>
                             )}
                           </button>

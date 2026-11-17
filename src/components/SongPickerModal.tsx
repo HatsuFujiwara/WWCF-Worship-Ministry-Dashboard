@@ -79,8 +79,9 @@ export const SongPickerModal: React.FC<SongPickerModalProps> = ({
       return false;
     }
 
-    // Key
-    if (selectedKey !== 'all' && s.key !== selectedKey) {
+    // Key (match originalKey || key consistently with card display)
+    const effectiveKey = s.originalKey || s.key || '';
+    if (selectedKey !== 'all' && effectiveKey !== selectedKey) {
       return false;
     }
 
@@ -106,7 +107,7 @@ export const SongPickerModal: React.FC<SongPickerModalProps> = ({
       const terms = cleanQ.split(' ');
       const titleLower = s.title.toLowerCase();
       const artistLower = s.artist.toLowerCase();
-      const keyLower = (s.key || '').toLowerCase();
+      const keyLower = (s.originalKey || s.key || '').toLowerCase();
       const langLower = (s.language || '').toLowerCase();
 
       return terms.every(
@@ -125,7 +126,7 @@ export const SongPickerModal: React.FC<SongPickerModalProps> = ({
   const availableLanguages = Array.from(
     new Set(allSongs.map((s) => sanitizeSongLanguage(s.language)).filter(Boolean))
   );
-  const availableKeys = Array.from(new Set(allSongs.map((s) => s.key).filter(Boolean)));
+  const availableKeys = Array.from(new Set(allSongs.map((s) => s.originalKey || s.key).filter(Boolean)));
 
   const { zIndex, isTopmost, isBlocked } = useOverlay({
     id: 'song-picker-modal',

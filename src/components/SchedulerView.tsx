@@ -6,7 +6,15 @@ import { StorageService } from '../services/storage';
 import { TemplateService } from '../services/templateService';
 import { AvailabilityService } from '../services/availabilityService';
 import { exportRehearsalSheetAsPDF } from '../services/exportService';
-import { getNextAvailableServiceDate, getSmartInitialServiceDetails, isScheduleEmpty, isNoServiceSchedule } from '../utils/scheduleUtils';
+import {
+  getNextAvailableServiceDate,
+  getSmartInitialServiceDetails,
+  isScheduleEmpty,
+  isNoServiceSchedule,
+  createDefaultRehearsalChecklist,
+  NO_SERVICE_REASON_MAX_LENGTH,
+  normalizeNoServiceReason
+} from '../utils/scheduleUtils';
 import { getManilaNowISO, getManilaTodayString, formatDateDisplayManila, getManilaDateParts, isValidServiceDateForType } from '../utils/dateUtils';
 import { sortTags } from '../utils/tagUtils';
 import { triggerHaptic } from '../utils/haptics';
@@ -425,23 +433,12 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   const [isTransitionsOpen, setIsTransitionsOpen] = useState<boolean>(true);
 
   // Rehearsal Readiness Checklist State (S-06)
-  const getDefaultRehearsalChecklist = useCallback((): RehearsalChecklist => ({
-    songSelectionFinalized: false,
-    performedKeysChecked: false,
-    lyricsReviewed: false,
-    referencesChecked: false,
-    teamAssignmentsFinalized: false,
-    transitionsPrepared: false
-  }), []);
+  const getDefaultRehearsalChecklist = useCallback(
+    (): RehearsalChecklist => createDefaultRehearsalChecklist(),
+    []
+  );
   const [rehearsalChecklist, setRehearsalChecklist] = useState<RehearsalChecklist>(() =>
-    editingSchedule?.rehearsalChecklist || {
-      songSelectionFinalized: false,
-      performedKeysChecked: false,
-      lyricsReviewed: false,
-      referencesChecked: false,
-      teamAssignmentsFinalized: false,
-      transitionsPrepared: false
-    }
+    editingSchedule?.rehearsalChecklist || createDefaultRehearsalChecklist()
   );
   const [isChecklistOpen, setIsChecklistOpen] = useState<boolean>(false);
 
@@ -2476,7 +2473,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       ministryAssignments: validAssignments,
       notes: serviceNotes.trim(),
       noService,
-      noServiceReason: noService ? (noServiceReason.trim() || undefined) : undefined,
+      noServiceReason: noService ? normalizeNoServiceReason(noServiceReason) : undefined,
       transitionNotes: noService ? {} : transitionNotes,
       rehearsalChecklist: noService ? getDefaultRehearsalChecklist() : rehearsalChecklist
     };
@@ -2634,7 +2631,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
         ministryAssignments: [],
         notes: serviceNotes.trim(),
         noService: true,
-        noServiceReason: noServiceReason.trim() || undefined,
+        noServiceReason: normalizeNoServiceReason(noServiceReason),
         transitionNotes: {},
         rehearsalChecklist: getDefaultRehearsalChecklist(),
         updatedAt: getManilaNowISO()
@@ -2967,7 +2964,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
   return (
     <div data-tour="scheduler-view" className="space-y-6 max-w-5xl mx-auto pb-36 sm:pb-40 animate-in fade-in duration-300">
       {/* Title Header */}
-      <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
+      <div className="p-5 sm:p-6 rounded-2xl wwcf-glass-card shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-[#1b75bc] dark:text-[#54b0e2] font-bold text-xs uppercase tracking-wider mb-1">
             <Church className="w-4 h-4" />
@@ -3054,7 +3051,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       {/* 1. Service Details Section */}
       <div className="p-6 rounded-2xl wwcf-surface-hero border border-slate-200/80 dark:border-white/10 shadow-xs space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200/60 dark:border-white/10">
-          <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
             <Church className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2]" />
             <span>Service Details & Context</span>
           </h3>
@@ -3163,13 +3160,13 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
               >
                 <span>Reason / Announcement (Optional)</span>
                 <span className="text-[11px] font-normal normal-case text-slate-400 dark:text-slate-500">
-                  {noServiceReason.length}/300
+                  {noServiceReason.length}/{NO_SERVICE_REASON_MAX_LENGTH}
                 </span>
               </label>
               <input
                 id="no-service-reason-input"
                 type="text"
-                maxLength={300}
+                maxLength={NO_SERVICE_REASON_MAX_LENGTH}
                 value={noServiceReason}
                 onChange={(e) => {
                   takeSnapshot(false);
@@ -3299,9 +3296,9 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                   initialCategory: 'praise'
                 })
               }
-              className="px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              className="btn-tactile px-3 py-1.5 bg-white dark:bg-[#11161e] hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
             >
-              <Youtube className="w-4 h-4 text-white" />
+              <Youtube className="w-4 h-4 text-rose-600 dark:text-rose-400" />
               <span>Import Song / Playlist</span>
             </button>
           </div>
@@ -3348,7 +3345,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 <button
                   type="button"
                   onClick={addPraiseSong}
-                  className="text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                  className="text-[#1b75bc] dark:text-[#54b0e2] text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Song</span>
@@ -3460,7 +3457,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                               value={praiseSongKeys[idx] || ''}
                               onChange={(e) => handlePraiseKeyChange(idx, e.target.value)}
                               placeholder="Key"
-                              className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
+                              className="w-full px-2 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] border border-[#1b75bc]/30 dark:border-[#54b0e2]/30 rounded-lg outline-none focus:ring-2 focus:ring-[#1b75bc]/25 text-center"
                             />
                           </div>
 
@@ -3482,7 +3479,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => moveSongUp('praise', idx)}
-                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
                               title="Move Up"
                             >
                               <ChevronUp className="w-3.5 h-3.5" />
@@ -3490,7 +3487,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => moveSongDown('praise', idx)}
-                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
                               title="Move Down"
                             >
                               <ChevronDown className="w-3.5 h-3.5" />
@@ -3667,15 +3664,15 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             onDrop={(e) => handleSectionDrop(e, 'worship')}
             className={`p-5 rounded-xl border transition-all duration-150 space-y-4 ${
               dragOverSection === 'worship'
-                ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-500/60 dark:border-indigo-500/40 ring-2 ring-indigo-500/20 shadow-sm'
+                ? 'bg-[#f0f7fc]/80 dark:bg-[#0f2b44]/40 border-[#1b75bc]/60 dark:border-[#54b0e2]/50 ring-2 ring-[#1b75bc]/20 shadow-sm'
                 : draggedItem && draggedItem.category !== 'worship'
-                ? 'border-dashed border-indigo-400/50 dark:border-indigo-500/30 bg-slate-50/50 dark:bg-slate-950/40'
-                : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800/80'
+                ? 'border-dashed border-[#1b75bc]/50 dark:border-[#54b0e2]/40 bg-slate-50/50 dark:bg-[#0b0e13]/60'
+                : 'bg-slate-50/50 dark:bg-[#0b0e13]/60 border-slate-200 dark:border-white/10'
             }`}
           >
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Heart className="w-4 h-4 text-indigo-500 fill-indigo-500/20" />
+                <Heart className="w-4 h-4 text-[#1b75bc] dark:text-[#54b0e2] fill-[#1b75bc]/20" />
                 <span>Worship Songs (Slow)</span>
               </h4>
               <div className="flex items-center gap-2.5">
@@ -3691,7 +3688,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                       }
                     });
                   }}
-                  className="text-red-600 dark:text-red-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                  className="text-rose-600 dark:text-rose-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
                   title="Import worship song or playlist from YouTube URL"
                 >
                   <Youtube className="w-3.5 h-3.5" />
@@ -3700,7 +3697,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 <button
                   type="button"
                   onClick={addWorshipSong}
-                  className="text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                  className="text-[#1b75bc] dark:text-[#54b0e2] text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Song</span>
@@ -3713,13 +3710,13 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 <div
                   onDragOver={(e) => handleSectionDragOver(e, 'worship')}
                   onDrop={(e) => handleSectionDrop(e, 'worship')}
-                  className="py-6 px-4 rounded-xl border border-dashed border-indigo-300/80 dark:border-indigo-700/50 text-center flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400 bg-indigo-50/20 dark:bg-indigo-950/20"
+                  className="py-6 px-4 rounded-xl border border-dashed border-[#1b75bc]/40 dark:border-[#54b0e2]/35 text-center flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400 bg-[#f0f7fc]/60 dark:bg-[#0f2b44]/30"
                 >
                   <p className="text-xs font-medium">No worship songs currently added.</p>
                   <button
                     type="button"
                     onClick={addWorshipSong}
-                    className="btn-tactile inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/60 hover:bg-indigo-200 dark:hover:bg-indigo-800/80 rounded-lg transition-colors cursor-pointer"
+                    className="btn-tactile inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#1b75bc]/10 dark:bg-[#1b75bc]/20 hover:bg-[#1b75bc]/20 dark:hover:bg-[#1b75bc]/30 rounded-lg transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Worship Song</span>
@@ -3743,8 +3740,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                     {/* Insertion line indicator above item */}
                     {isDropTargetBefore && (
                       <div className="flex items-center gap-2 py-0.5 -my-1 pointer-events-none">
-                        <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
-                        <div className="h-0.5 w-full bg-indigo-500 dark:bg-indigo-400 rounded-full" />
+                        <div className="w-2 h-2 rounded-full bg-[#1b75bc] shrink-0" />
+                        <div className="h-0.5 w-full bg-[#1b75bc] dark:bg-[#54b0e2] rounded-full" />
                       </div>
                     )}
 
@@ -3759,10 +3756,10 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                           setActiveDragHandle(null);
                         }
                       }}
-                      className={`group flex flex-col gap-2 p-2.5 sm:p-2.5 bg-white dark:bg-slate-900 rounded-xl border transition-all ${
+                      className={`group flex flex-col gap-2 p-2.5 sm:p-2.5 bg-white dark:bg-[#11161e] rounded-xl border transition-all ${
                         isBeingDragged
-                          ? 'opacity-40 border-dashed border-indigo-400 dark:border-indigo-500 scale-[0.99]'
-                          : 'border-slate-200 dark:border-slate-800 shadow-2xs'
+                          ? 'opacity-40 border-dashed border-[#1b75bc] dark:border-[#54b0e2] scale-[0.99]'
+                          : 'border-slate-200 dark:border-white/10 shadow-2xs'
                       }`}
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -3772,7 +3769,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                           <div
                             onMouseDown={() => setActiveDragHandle({ category: 'worship', index: idx })}
                             onTouchStart={() => setActiveDragHandle({ category: 'worship', index: idx })}
-                            className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors shrink-0 select-none"
+                            className="cursor-grab active:cursor-grabbing text-slate-400 dark:text-slate-500 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] hover:bg-slate-100 dark:hover:bg-white/5 p-1.5 rounded transition-colors shrink-0 select-none"
                             title="Drag to reorder or move to Praise (Fast)"
                           >
                             <GripVertical className="w-4 h-4" />
@@ -3812,7 +3809,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                               value={worshipSongKeys[idx] || ''}
                               onChange={(e) => handleWorshipKeyChange(idx, e.target.value)}
                               placeholder="Key"
-                              className="w-full px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 text-center"
+                              className="w-full px-2 py-1.5 text-xs font-bold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] border border-[#1b75bc]/30 dark:border-[#54b0e2]/30 rounded-lg outline-none focus:ring-2 focus:ring-[#1b75bc]/25 text-center"
                             />
                           </div>
 
@@ -3822,7 +3819,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                             onChange={(e) =>
                               changeSongCategory('worship', idx, e.target.value as 'praise' | 'worship')
                             }
-                            className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-indigo-200 dark:border-indigo-900/80 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 outline-none cursor-pointer shrink-0"
+                            className="text-[11px] font-semibold py-1.5 px-2 rounded-lg border border-[#1b75bc]/30 dark:border-[#54b0e2]/30 bg-[#f0f7fc] dark:bg-[#0f2b44] text-[#1b75bc] dark:text-[#54b0e2] outline-none cursor-pointer shrink-0"
                             title="Change Category"
                           >
                             <option value="praise">Praise</option>
@@ -3834,7 +3831,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => moveSongUp('worship', idx)}
-                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
                               title="Move Up"
                             >
                               <ChevronUp className="w-3.5 h-3.5" />
@@ -3842,7 +3839,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => moveSongDown('worship', idx)}
-                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
+                              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-[#1b75bc] dark:hover:text-[#54b0e2] bg-slate-50 dark:bg-slate-800/50 sm:bg-transparent rounded transition-colors cursor-pointer"
                               title="Move Down"
                             >
                               <ChevronDown className="w-3.5 h-3.5" />
@@ -3976,8 +3973,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                     {/* Insertion line indicator below item */}
                     {isDropTargetAfter && (
                       <div className="flex items-center gap-2 py-0.5 -my-1 pointer-events-none">
-                        <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
-                        <div className="h-0.5 w-full bg-indigo-500 dark:bg-indigo-400 rounded-full" />
+                        <div className="w-2 h-2 rounded-full bg-[#1b75bc] shrink-0" />
+                        <div className="h-0.5 w-full bg-[#1b75bc] dark:bg-[#54b0e2] rounded-full" />
                       </div>
                     )}
                   </React.Fragment>
@@ -4002,8 +3999,8 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                     dropTarget?.category === 'worship' &&
                     dropTarget.position === 'after' &&
                     dropTarget.index === worshipSongs.length - 1
-                      ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold'
-                      : 'border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-indigo-400'
+                      ? 'border-[#1b75bc] bg-[#f0f7fc]/80 dark:bg-[#0f2b44]/60 text-[#1b75bc] dark:text-[#54b0e2] font-bold'
+                      : 'border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-[#1b75bc]/60'
                   }`}
                 >
                   <span>Drop here to add as last Worship song</span>
@@ -4055,9 +4052,9 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 type="checkbox"
                 checked={isSmartFilter}
                 onChange={(e) => setIsSmartFilter(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                className="w-4 h-4 rounded border-slate-300 text-[#1b75bc] focus:ring-[#1b75bc] accent-[#1b75bc] cursor-pointer"
               />
-              <Filter className="w-3.5 h-3.5 text-indigo-500" />
+              <Filter className="w-3.5 h-3.5 text-[#1b75bc] dark:text-[#54b0e2]" />
               <span>Smart filter members</span>
             </label>
           </div>
@@ -4078,7 +4075,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
             return (
               <div
                 key={row.id}
-                className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 space-y-3 transition-all hover:border-slate-300 dark:hover:border-slate-600"
+                className="p-4 rounded-xl bg-slate-50/80 dark:bg-[#0b0e13]/70 border border-slate-200/80 dark:border-white/10 space-y-3 transition-all hover:border-slate-300 dark:hover:border-white/20"
               >
                 {/* Top Row: Role Name, Delete */}
                 <div className="flex items-center justify-between gap-3">
@@ -4088,7 +4085,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                       value={row.role}
                       onChange={(e) => handleMinistryRoleChange(row.id, e.target.value)}
                       placeholder="Ministry Role (e.g. Song Leader (Praise), Backup Singer/s)"
-                      className="w-full px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                      className="w-full px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#11161e] text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-[#1b75bc]/25 focus:border-[#1b75bc] outline-none"
                     />
                   </div>
 
@@ -4104,14 +4101,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
                 </div>
 
                 {/* Members List Section */}
-                <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60">
+                <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-white/10">
                   <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
                     <span>Assigned Member(s) ({currentAssigned.length})</span>
                     {!hideAddMemberButton && (
                       <button
                         type="button"
                         onClick={() => handleAddMemberToMinistry(row.id)}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1b75bc] dark:text-[#54b0e2] hover:underline transition-colors cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Add Member</span>
@@ -4402,7 +4399,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
           <button
             type="button"
             onClick={addMinistryRow}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-100 dark:hover:bg-indigo-900/80 rounded-lg transition-colors cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-[#1b75bc] dark:text-[#54b0e2] bg-[#f0f7fc] dark:bg-[#0f2b44] hover:bg-[#1b75bc]/15 dark:hover:bg-[#1b75bc]/25 border border-[#1b75bc]/20 dark:border-[#54b0e2]/25 rounded-xl transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Custom Ministry Role</span>
@@ -4650,7 +4647,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({
       )}
 
       {/* Form Action Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3.5 sm:p-4 rounded-2xl wwcf-glass-card shadow-xl border border-slate-200/80 dark:border-white/10 sticky bottom-3 sm:bottom-4 z-20 backdrop-blur-md">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3.5 sm:p-4 rounded-2xl wwcf-toolbar-sticky shadow-xl sticky bottom-3 sm:bottom-4 z-20">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           <button
             type="button"

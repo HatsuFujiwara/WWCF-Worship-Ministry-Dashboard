@@ -3,7 +3,10 @@ import { Song, SongFamily, SongRelationshipType, SongVersionRef } from '../types
 /**
  * Common regex to clean song titles for version discovery without losing original title.
  */
-const VERSION_INDICATOR_REGEX = /\s*[\(\[](official\s*video|official\s*audio|official\s*live|live(\s*version)?|acoustic(\s*version)?|studio(\s*version)?|remaster(ed)?|radio\s*edit|extended(\s*mix)?|cover|lyric(\s*video)?|unplugged|feat\..*?|ft\..*?)[\)\]]/gi;
+const VERSION_INDICATOR_PATTERN =
+  '\\s*[\\(\\[](official\\s*video|official\\s*audio|official\\s*live|live(\\s*version)?|acoustic(\\s*version)?|studio(\\s*version)?|remaster(ed)?|radio\\s*edit|extended(\\s*mix)?|cover|lyric(\\s*video)?|unplugged|feat\\..*?|ft\\..*?)[\\)\\]]';
+const VERSION_INDICATOR_REGEX = new RegExp(VERSION_INDICATOR_PATTERN, 'gi');
+const VERSION_INDICATOR_TEST_REGEX = new RegExp(VERSION_INDICATOR_PATTERN, 'i');
 
 const TRAILING_VERSION_REGEX = /\s+-\s+(live|acoustic|studio|remastered|cover|instrumental)(\s+version)?$/i;
 
@@ -225,8 +228,8 @@ export function verifySongIdentity(songA: Song, songB: Song): SongMatchEvidence 
   // Check Version indicators in title
   const titleA = songA?.title || '';
   const titleB = songB?.title || '';
-  const hasVersionTagA = (titleA && (VERSION_INDICATOR_REGEX.test(titleA) || TRAILING_VERSION_REGEX.test(titleA))) || false;
-  const hasVersionTagB = (titleB && (VERSION_INDICATOR_REGEX.test(titleB) || TRAILING_VERSION_REGEX.test(titleB))) || false;
+  const hasVersionTagA = (titleA && (VERSION_INDICATOR_TEST_REGEX.test(titleA) || TRAILING_VERSION_REGEX.test(titleA))) || false;
+  const hasVersionTagB = (titleB && (VERSION_INDICATOR_TEST_REGEX.test(titleB) || TRAILING_VERSION_REGEX.test(titleB))) || false;
   if (hasVersionTagA || hasVersionTagB) {
     score += 15;
     reasons.push('Explicit recording/version descriptor detected in title');

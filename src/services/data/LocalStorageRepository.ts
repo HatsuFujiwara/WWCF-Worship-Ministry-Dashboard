@@ -1,7 +1,7 @@
 import { Member, Schedule } from '../../types';
 import { DEFAULT_LABELS, DEFAULT_MEMBERS, DEFAULT_SCHEDULES } from '../../data/seedData';
 import { IDataRepository } from './types';
-import { sanitizeMembers, sanitizeLabels, sanitizeSchedules } from '../storage';
+import { sanitizeMembers, sanitizeLabels, sanitizeSchedules, quarantineCorruptStorage } from '../storage';
 
 const STORAGE_KEYS = {
   MEMBERS: 'wwcf_members_v1',
@@ -14,17 +14,22 @@ const STORAGE_KEYS = {
 
 export class LocalStorageRepository implements IDataRepository {
   async getMembers(): Promise<Member[]> {
+    let rawStr: string | null = null;
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.MEMBERS);
-      if (data === null) {
+      rawStr = localStorage.getItem(STORAGE_KEYS.MEMBERS);
+      if (rawStr === null) {
         return sanitizeMembers(DEFAULT_MEMBERS);
       }
-      const raw: Member[] = JSON.parse(data);
+      const raw: Member[] = JSON.parse(rawStr);
       if (!Array.isArray(raw)) {
-        throw new Error('Stored members payload is not an array');
+        quarantineCorruptStorage(STORAGE_KEYS.MEMBERS, rawStr, 'Stored members payload is not an array.');
+        return [];
       }
       return sanitizeMembers(raw);
     } catch (e) {
+      if (rawStr) {
+        quarantineCorruptStorage(STORAGE_KEYS.MEMBERS, rawStr, 'Stored members JSON could not be parsed.');
+      }
       console.error('[LocalStorageRepository] Failed to read members:', e);
       return [];
     }
@@ -41,17 +46,22 @@ export class LocalStorageRepository implements IDataRepository {
   }
 
   async getLabels(): Promise<string[]> {
+    let rawStr: string | null = null;
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.LABELS);
-      if (data === null) {
+      rawStr = localStorage.getItem(STORAGE_KEYS.LABELS);
+      if (rawStr === null) {
         return sanitizeLabels(DEFAULT_LABELS);
       }
-      const raw: string[] = JSON.parse(data);
+      const raw: string[] = JSON.parse(rawStr);
       if (!Array.isArray(raw)) {
-        throw new Error('Stored labels payload is not an array');
+        quarantineCorruptStorage(STORAGE_KEYS.LABELS, rawStr, 'Stored labels payload is not an array.');
+        return sanitizeLabels(DEFAULT_LABELS);
       }
       return sanitizeLabels(raw);
     } catch (e) {
+      if (rawStr) {
+        quarantineCorruptStorage(STORAGE_KEYS.LABELS, rawStr, 'Stored labels JSON could not be parsed.');
+      }
       console.error('[LocalStorageRepository] Failed to read labels:', e);
       return sanitizeLabels(DEFAULT_LABELS);
     }
@@ -68,17 +78,22 @@ export class LocalStorageRepository implements IDataRepository {
   }
 
   async getSchedules(): Promise<Schedule[]> {
+    let rawStr: string | null = null;
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
-      if (data === null) {
+      rawStr = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
+      if (rawStr === null) {
         return sanitizeSchedules(DEFAULT_SCHEDULES);
       }
-      const raw: Schedule[] = JSON.parse(data);
+      const raw: Schedule[] = JSON.parse(rawStr);
       if (!Array.isArray(raw)) {
-        throw new Error('Stored schedules payload is not an array');
+        quarantineCorruptStorage(STORAGE_KEYS.SCHEDULES, rawStr, 'Stored schedules payload is not an array.');
+        return [];
       }
       return sanitizeSchedules(raw);
     } catch (e) {
+      if (rawStr) {
+        quarantineCorruptStorage(STORAGE_KEYS.SCHEDULES, rawStr, 'Stored schedules JSON could not be parsed.');
+      }
       console.error('[LocalStorageRepository] Failed to read schedules:', e);
       return [];
     }

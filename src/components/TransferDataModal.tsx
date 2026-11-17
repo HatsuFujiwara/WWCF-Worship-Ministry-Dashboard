@@ -109,7 +109,7 @@ async function buildCurrentPayload(options: {
   const boundedLabels = currentLabels.map((l) => (typeof l === 'string' ? l.trim().slice(0, 100) : '')).filter(Boolean);
 
   return {
-    app: 'WWCF Santa Cruz Worship Ministry',
+    app: 'WWCF Worship Song Line-up Scheduler',
     version: '1.0',
     exportedAt: new Date().toISOString(),
     direction: options.direction,
